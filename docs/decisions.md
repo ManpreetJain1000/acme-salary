@@ -106,6 +106,38 @@ Short records of the choices that shape the system. Each: decision → why → w
 - **Rate limiting:** 600 requests per minute per client on `/api` (configurable). Requests arrive through the Next.js proxy, so the API trusts `X-Forwarded-For` from loopback only. Limits therefore apply per real client, not per proxy. This relies on the hosting platform's load balancer appending the client address (Render does). The in-memory store is right for one instance; several instances would share a store such as Redis.
 - **Backups:** SQLite's online backup API copies the live database safely while it is in use. Each copy is integrity-checked, and the newest 14 are kept. For continuous off-machine copies, use Litestream.
 
+## D21. Optimistic locking on every employee write
+- **Why:** two HR users editing the same employee meant the last save silently won. A raise could disappear without anyone noticing.
+- **How:**
+  - `employees.version` (migration 8) is bumped by every write.
+  - Writes are compare-and-set in SQL (`WHERE version = expected`).
+  - Over HTTP: reads return `ETag: "<version>"`. PATCH, terminate and reinstate must send `If-Match`: 428 without it, 412 `STALE` if out of date, `*` to overwrite deliberately.
+  - On 412 the UI explains what happened, closes the edit form and reloads the latest copy.
+- **Why a counter, not `updated_at`:** two saves can share a millisecond.
+
+## D22. The audit trail records who, when, and at which rate
+- **Why:** an HR audit trail that says *what* changed but not *who* changed it is incomplete. Without the rate in force, past USD figures can't be reproduced.
+- **How (migration 9):**
+  - `salary_history.changed_by` (the signed-in user) and `usd_rate`.
+  - An append-only `employment_events` table (hired / terminated / reinstated), written in the same transaction as the change and backfilled for existing employees.
+  - Rows from before the migration can't be backfilled, because history is append-only, so they show as "before audit".
+
+## D23. CI and a real health check
+- **CI:** every push runs typecheck, all tests and the production build. A second job builds the Docker image, runs it in production mode, and checks health, that the API requires sign-in, and that sign-in works through the public port.
+- **Health:** `/api/health` also queries the database and returns 503 if it can't answer, so the platform stops routing to a broken instance.
+
+## Known gaps (deliberately not built yet)
+| Gap | Why it matters | Next step |
+|---|---|---|
+| **No effective dating** | Changes take effect when saved. HR needs "raise effective 1 April" and backdated corrections. | `effective_date` on salary history; current salary = the latest effective row; a scheduled job for future dates |
+| **Privacy vs. append-only history** | Under GDPR a leaver can ask to be erased, but history can never be deleted | A retention policy: after N years, anonymise leavers' personal fields and keep the pay figures for reporting |
+| **One shared HR account** | No per-person accountability beyond the shared email; sessions can't be revoked early | SSO (OIDC), per-user roles, a sessions table, an access log of who viewed which salaries |
+| **Single node** | The database is a file in the container; data resets on redeploy on free hosting | Postgres behind the repository; migrations as a release step; a shared rate-limit store |
+| **Cold insights block the event loop** | ~0.4 s at 100k on the first visit after a change | Precomputed aggregates, or a worker thread |
+| **Reference data in code** | A new country, currency or title needs a deploy | Admin-managed reference tables with formal pay bands |
+| **API types copied by hand in the web app** | Drift risk as the team grows | OpenAPI generated from the zod schemas, or a shared types package |
+| **No committed end-to-end tests** | UI flows were verified with browser scripts during development, not in CI | Playwright suite in CI against the Docker image |
+
 ## Scaling review (measured, see performance.md)
 - **Vertical:** at 100k employees (10× the brief) every directory query is under 20 ms, search 9 ms, and a cached insights page 0.1 ms. The remaining cost is the first insights visit after a change.
 - **Horizontal: not yet, by design.** The database is a file in the container, so a second instance would have its own diverging data. The app code is otherwise stateless.

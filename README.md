@@ -51,7 +51,9 @@ The database is seeded deterministically on first boot. On free tiers with ephem
 
 ## Engineering highlights
 - **Money is integer minor units** in the employee's local currency. USD is derived at read time from a dated static FX table and never stored over the original.
-- **The salary audit trail can't be lost:** every change writes history in the same transaction, people who leave are terminated (not deleted), and database triggers reject any edit or delete of history.
+- **The salary audit trail can't be lost:** every change writes history in the same transaction, recording who made it and the FX rate in force. People who leave are terminated, not deleted, and leaving or reinstating is itself recorded. Database triggers reject any edit or delete of history.
+- **No silent overwrites:** optimistic locking with standard `ETag` / `If-Match`. A stale edit gets 412 and the UI reloads the latest copy.
+- **CI on every push:** typecheck, all tests, the production build, and a smoke test of the real Docker image.
 - **Seed:** a seeded PRNG and fixed reference date (same data everywhere); one `BEGIN IMMEDIATE` transaction (all or nothing); the emptiness check runs inside the transaction, so concurrent boots can't double-seed. 10k employees in under a second.
 - **Measured at 10× scale (100k employees):** every directory query under 20 ms, search 9 ms, a cached insights page 0.1 ms. Getting there took an insights cache keyed by a database-maintained data version, an expression index for the USD salary sort, an FTS5 trigram search index, and fresh planner statistics. Query-plan tests guard against regressions ([performance](docs/performance.md)).
 - **Sign-in:** scrypt-hashed password, HMAC-signed HttpOnly + SameSite session cookie (Secure in production), every API route protected (sweep-tested), failed sign-ins rate limited, POSTs must be JSON (CSRF defence in depth), production won't boot without real secrets.
@@ -78,8 +80,9 @@ The database is seeded deterministically on first boot. On free tiers with ephem
 Multi-user accounts and SSO (one HR sign-in today), payroll/tax, live FX, Excel import/export (the highest-value next feature), demographic pay-gap analysis, and horizontal scaling (needs Postgres; the path is documented). Reasons are in [requirements](docs/requirements.md) and [decisions](docs/decisions.md).
 
 ## What I'd do next
-1. SSO with per-user accounts and roles, salary fields gated by role, and an access audit log.
-2. Excel/CSV import with a dry-run diff, plus export of any filtered view.
-3. Postgres behind the existing repository layer, migrations as a release step, then several stateless instances with a shared rate-limit store.
-4. Precomputed insights aggregates, so the first visit after a change is fast at 100k+ too.
-5. Scheduled FX refresh, with historical rates per salary change.
+The full list, with reasons, is under "Known gaps" in [decisions](docs/decisions.md). In order:
+1. Effective-dated salary changes ("raise effective 1 April") and a privacy retention policy for leavers.
+2. SSO with per-user accounts and roles, salary fields gated by role, and an access audit log.
+3. Excel/CSV import with a dry-run diff, plus export of any filtered view.
+4. Postgres behind the existing repository layer, migrations as a release step, then several stateless instances with a shared rate-limit store.
+5. Precomputed insights aggregates, so the first visit after a change is fast at 100k+ too.

@@ -11,6 +11,7 @@ Tell it as the HR manager's day, not as a feature tour.
 - Filter Country = India, Department = Engineering. Sort by Salary and mention it sorts by USD equivalent across currencies.
 - Open an employee. Show local salary, the ≈ USD value and the salary history timeline.
 - Edit: give a 10% raise and save. The timeline shows a new "Raise +10%" entry, written in the same transaction as the update.
+- Point at the audit line under each salary change: who made it. Mention optimistic locking: if two HR users edit the same person, the second save is rejected rather than silently overwriting.
 - Mark as left: pick the last day. They disappear from Current, appear under Former with their history intact, and drop out of insights. Mention that the database itself refuses to delete history. Reinstate to undo.
 
 **1:20 · Data quality (30 s)**

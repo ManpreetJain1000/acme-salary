@@ -61,7 +61,7 @@ erDiagram
 
 Indexes: `country`, `department`, `job_title`, `full_name`, `(status, full_name)` for the default directory page, the composite `(country, job_title, salary_minor)` for pay-group queries, and `(employee_id, changed_at)` on history.
 
-**Migrations** are ordered and recorded in SQLite's `user_version` (`db/database.ts`): 1 initial schema · 2 employee status · 3 triggers that make history append-only and block employee deletes · 4 the `(status, full_name)` index · 5 `app_meta.data_version` + triggers (insights cache) · 6 the USD salary-sort expression index · 7 the FTS5 trigram search index + sync triggers.
+**Migrations** are ordered and recorded in SQLite's `user_version` (`db/database.ts`): 1 initial schema · 2 employee status · 3 triggers that make history append-only and block employee deletes · 4 the `(status, full_name)` index · 5 `app_meta.data_version` + triggers (insights cache) · 6 the USD salary-sort expression index · 7 the FTS5 trigram search index + sync triggers · 8 `employees.version` (optimistic locking) · 9 `changed_by` / `usd_rate` on salary history + append-only `employment_events`.
 
 **Reference data** (countries, currencies with static FX rates, departments → job titles → level bands) lives in `apps/api/src/domain/reference.ts`. It changes when the code is released, not when HR edits data. It is the single source for validation enums, the seed and the UI dropdowns (served at `GET /api/meta`).
 
@@ -70,17 +70,17 @@ Indexes: `country`, `department`, `job_title`, `full_name`, `(status, full_name)
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/employees?page&pageSize&search&country&department&jobTitle&status&sortBy&sortDir` | Paginated directory (pageSize ≤ 100; sort fields allow-listed; `status` = active (default) / terminated / all) |
-| GET | `/api/employees/:id` | Employee + salary history |
+| GET | `/api/employees/:id` | Employee + salary history + employment events; `ETag: "<version>"` |
 | POST | `/api/employees` | Create (201 + Location) |
-| PATCH | `/api/employees/:id` | Partial update; salary/currency change writes history |
-| POST | `/api/employees/:id/terminate` | Record that someone left (`{terminationDate?}`, defaults to today); record and history kept |
-| POST | `/api/employees/:id/reinstate` | Undo a termination |
+| PATCH | `/api/employees/:id` | Partial update; **requires `If-Match`** (428 / 412 STALE); salary/currency change writes history with who + FX rate |
+| POST | `/api/employees/:id/terminate` | Record that someone left (`{terminationDate?}`, defaults to today); requires `If-Match`; writes an employment event |
+| POST | `/api/employees/:id/reinstate` | Undo a termination; requires `If-Match`; writes an employment event |
 | DELETE | `/api/employees/:id` | 405: employees are never hard-deleted |
 | GET | `/api/insights/summary?country&department&jobTitle` | Current employees: headcount, USD payroll, median; breakdown by country and department |
 | GET | `/api/insights/pay-bands?…` | min/p25/median/p75/max per (country, job title), local currency + USD median |
 | GET | `/api/insights/outliers?…&threshold&minGroupSize&limit` | Employees ≥ threshold away from their pay-group median |
 | GET | `/api/meta` | Reference data for dropdowns, FX "as of" date |
-| GET | `/api/health` | Liveness (public, not rate limited) |
+| GET | `/api/health` | Process and database health; 503 if the database can't answer (public, not rate limited) |
 | POST | `/api/auth/login` | Sign in (`{email, password}`); sets the session cookie; failed attempts rate limited |
 | POST | `/api/auth/logout` | Clear the session |
 | GET | `/api/auth/me` | The signed-in user |
