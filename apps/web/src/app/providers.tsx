@@ -1,7 +1,6 @@
 'use client';
 
 import { createTheme, MantineProvider } from '@mantine/core';
-import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
@@ -31,10 +30,8 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       <MantineProvider theme={theme} defaultColorScheme="auto">
-        <ModalsProvider>
-          <Notifications position="top-right" />
-          {children}
-        </ModalsProvider>
+        <Notifications position="top-right" />
+        {children}
       </MantineProvider>
     </QueryClientProvider>
   );

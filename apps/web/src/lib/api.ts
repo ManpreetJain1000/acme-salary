@@ -61,7 +61,12 @@ export const api = {
     request<Employee>('/api/employees', { method: 'POST', body: JSON.stringify(input) }),
   updateEmployee: (id: number, patch: Partial<EmployeeInput>) =>
     request<Employee>(`/api/employees/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-  deleteEmployee: (id: number) => request<void>(`/api/employees/${id}`, { method: 'DELETE' }),
+  terminateEmployee: (id: number, terminationDate?: string) =>
+    request<Employee>(`/api/employees/${id}/terminate`, {
+      method: 'POST',
+      body: JSON.stringify(terminationDate ? { terminationDate } : {}),
+    }),
+  reinstateEmployee: (id: number) => request<Employee>(`/api/employees/${id}/reinstate`, { method: 'POST' }),
   summary: (f: InsightFilter) => request<Summary>(`/api/insights/summary${toQueryString(f)}`),
   payBands: (f: InsightFilter) =>
     request<{ data: PayBand[] }>(`/api/insights/pay-bands${toQueryString(f)}`).then((r) => r.data),

@@ -140,7 +140,7 @@ export default function InsightsPage() {
       <div>
         <Title order={2}>Pay insights</Title>
         <Text c="dimmed" size="sm">
-          How ACME pays its people. Cross-country figures are converted to USD at static rates as of{' '}
+          How ACME pays its current employees. Cross-country figures are converted to USD at static rates as of{' '}
           {meta?.fxAsOf ?? '…'}.
         </Text>
       </div>

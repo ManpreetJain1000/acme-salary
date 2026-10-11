@@ -12,9 +12,14 @@ export interface Employee {
   salaryMinor: number;
   salaryUsdMinor: number;
   hireDate: string;
+  status: EmployeeStatus;
+  /** Last day of employment, YYYY-MM-DD; null while active. */
+  terminatedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export type EmployeeStatus = 'active' | 'terminated';
 
 export interface SalaryChange {
   oldSalaryMinor: number | null;
@@ -110,4 +115,5 @@ export interface EmployeeQuery extends InsightFilter {
   search?: string;
   sortBy: string;
   sortDir: 'asc' | 'desc';
+  status: EmployeeStatus | 'all';
 }

@@ -2,12 +2,14 @@
 
 import {
   Alert,
+  Badge,
   Button,
   Center,
   Group,
   Modal,
   Pagination,
   Paper,
+  SegmentedControl,
   Skeleton,
   Stack,
   Table,
@@ -34,9 +36,16 @@ import { FilterBar } from '@/components/FilterBar';
 import { api } from '@/lib/api';
 import { formatCount, formatMoney, formatUsd } from '@/lib/format';
 import { useMetaLookups } from '@/lib/hooks';
-import type { EmployeeQuery, InsightFilter } from '@/lib/types';
+import type { EmployeeQuery, EmployeeStatus, InsightFilter } from '@/lib/types';
 
 const PAGE_SIZE = 25;
+
+function countLabel(n: number, status: EmployeeStatus | 'all', filtered: boolean): string {
+  const noun = n === 1 ? 'employee' : 'employees';
+  if (filtered) return `${formatCount(n)} matching`;
+  if (status === 'all') return `${formatCount(n)} ${noun}, current and former`;
+  return `${formatCount(n)} ${status === 'active' ? 'current' : 'former'} ${noun}`;
+}
 
 type SortKey = 'fullName' | 'jobTitle' | 'department' | 'country' | 'salary' | 'hireDate';
 
@@ -71,10 +80,11 @@ function SortHeader({
 
 export default function EmployeesPage() {
   const queryClient = useQueryClient();
-  const { countryName } = useMetaLookups();
+  const { meta, countryName } = useMetaLookups();
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search.trim(), 300);
   const [filters, setFilters] = useState<InsightFilter>({});
+  const [status, setStatus] = useState<EmployeeStatus | 'all'>('active');
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<{ by: SortKey; dir: 'asc' | 'desc' }>({ by: 'fullName', dir: 'asc' });
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -87,6 +97,7 @@ export default function EmployeesPage() {
     ...filters,
     sortBy: sort.by,
     sortDir: sort.dir,
+    status,
   };
 
   const list = useQuery({
@@ -119,7 +130,10 @@ export default function EmployeesPage() {
         <div>
           <Title order={2}>Employees</Title>
           <Text c="dimmed" size="sm">
-            {data ? `${formatCount(data.total)} ${hasFilters ? 'matching' : 'total'}` : 'Loading…'}
+            {data
+              ? countLabel(data.total, status, hasFilters)
+              : 'Loading…'}
+            {meta && ` · USD values at static rates as of ${meta.fxAsOf}`}
           </Text>
         </div>
         <Button leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
@@ -138,10 +152,23 @@ export default function EmployeesPage() {
           label="Search"
           placeholder="Name, email or employee code"
           leftSection={<IconSearch size={16} />}
-          w={280}
+          w={260}
           value={search}
           onChange={(e) => {
             setSearch(e.currentTarget.value);
+            setPage(1);
+          }}
+        />
+        <SegmentedControl
+          aria-label="Employment status"
+          data={[
+            { value: 'active', label: 'Current' },
+            { value: 'terminated', label: 'Former' },
+            { value: 'all', label: 'All' },
+          ]}
+          value={status}
+          onChange={(v) => {
+            setStatus(v as EmployeeStatus | 'all');
             setPage(1);
           }}
         />
@@ -183,9 +210,16 @@ export default function EmployeesPage() {
               {data?.data.map((e) => (
                 <Table.Tr key={e.id} onClick={() => setSelectedId(e.id)} style={{ cursor: 'pointer' }}>
                   <Table.Td>
-                    <Text size="sm" fw={500}>
-                      {e.fullName}
-                    </Text>
+                    <Group gap={6} wrap="nowrap">
+                      <Text size="sm" fw={500}>
+                        {e.fullName}
+                      </Text>
+                      {e.status === 'terminated' && (
+                        <Badge size="xs" variant="light" color="gray">
+                          Left {e.terminatedAt}
+                        </Badge>
+                      )}
+                    </Group>
                     <Text size="xs" c="dimmed">
                       {e.employeeCode}
                     </Text>

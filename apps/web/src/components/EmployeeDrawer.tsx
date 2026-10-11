@@ -7,15 +7,16 @@ import {
   Divider,
   Drawer,
   Group,
+  Modal,
   Skeleton,
   Stack,
   Text,
+  TextInput,
   Timeline,
   Title,
 } from '@mantine/core';
-import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
-import { IconAlertCircle, IconPencil, IconTrash } from '@tabler/icons-react';
+import { IconAlertCircle, IconArrowBackUp, IconDoorExit, IconPencil } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '@/lib/api';
@@ -38,8 +39,9 @@ function describeChange(c: SalaryChange): { label: string; delta?: string } {
 
 export function EmployeeDrawer({ employeeId, onClose }: Props) {
   const queryClient = useQueryClient();
-  const { countryName } = useMetaLookups();
+  const { meta, countryName } = useMetaLookups();
   const [editing, setEditing] = useState(false);
+  const [leaveDate, setLeaveDate] = useState<string | null>(null); // non-null = dialog open
 
   const query = useQuery({
     queryKey: ['employee', employeeId],
@@ -59,28 +61,27 @@ export function EmployeeDrawer({ employeeId, onClose }: Props) {
     },
   });
 
-  const remove = useMutation({
-    mutationFn: () => api.deleteEmployee(employeeId!),
-    onSuccess: async () => {
-      onClose();
+  const showError = (err: Error) => notifications.show({ color: 'red', message: err.message });
+
+  // Leaving keeps the record and its salary history; it can be undone with Reinstate.
+  const terminate = useMutation({
+    mutationFn: (date: string) => api.terminateEmployee(employeeId!, date),
+    onSuccess: async (e) => {
+      setLeaveDate(null);
       await invalidate();
-      notifications.show({ color: 'green', message: 'Employee deleted' });
+      notifications.show({ color: 'green', message: `${e.fullName} marked as left on ${e.terminatedAt}` });
     },
-    onError: (err) => notifications.show({ color: 'red', message: err.message }),
+    onError: showError,
   });
 
-  const confirmDelete = () =>
-    modals.openConfirmModal({
-      title: 'Delete employee?',
-      children: (
-        <Text size="sm">
-          This permanently removes <b>{employee?.fullName}</b> and their salary history.
-        </Text>
-      ),
-      labels: { confirm: 'Delete', cancel: 'Cancel' },
-      confirmProps: { color: 'red' },
-      onConfirm: () => remove.mutate(),
-    });
+  const reinstate = useMutation({
+    mutationFn: () => api.reinstateEmployee(employeeId!),
+    onSuccess: async (e) => {
+      await invalidate();
+      notifications.show({ color: 'green', message: `${e.fullName} reinstated` });
+    },
+    onError: showError,
+  });
 
   const close = () => {
     setEditing(false);
@@ -139,26 +140,44 @@ export function EmployeeDrawer({ employeeId, onClose }: Props) {
             </Text>
             {employee.currency !== 'USD' && (
               <Text size="sm" c="dimmed">
-                ≈ {formatUsd(employee.salaryUsdMinor)}
+                ≈ {formatUsd(employee.salaryUsdMinor)} at static rates as of {meta?.fxAsOf ?? '…'}
               </Text>
             )}
             <Text size="sm" c="dimmed">
               Hired {employee.hireDate}
+              {employee.terminatedAt && ` · Left ${employee.terminatedAt}`}
             </Text>
           </div>
+          {employee.status === 'terminated' && (
+            <Alert color="gray" icon={<IconDoorExit />} title="Former employee">
+              Kept with their salary history, but left out of pay insights. Reinstate them to make changes.
+            </Alert>
+          )}
           <Group>
-            <Button leftSection={<IconPencil size={16} />} onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-            <Button
-              variant="light"
-              color="red"
-              leftSection={<IconTrash size={16} />}
-              loading={remove.isPending}
-              onClick={confirmDelete}
-            >
-              Delete
-            </Button>
+            {employee.status === 'active' ? (
+              <>
+                <Button leftSection={<IconPencil size={16} />} onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+                <Button
+                  variant="light"
+                  color="red"
+                  leftSection={<IconDoorExit size={16} />}
+                  onClick={() => setLeaveDate(new Date().toISOString().slice(0, 10))}
+                >
+                  Mark as left
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="light"
+                leftSection={<IconArrowBackUp size={16} />}
+                loading={reinstate.isPending}
+                onClick={() => reinstate.mutate()}
+              >
+                Reinstate
+              </Button>
+            )}
           </Group>
 
           <Divider label="Salary history" labelPosition="left" />
@@ -190,6 +209,29 @@ export function EmployeeDrawer({ employeeId, onClose }: Props) {
           </Timeline>
         </Stack>
       )}
+      <Modal opened={leaveDate !== null} onClose={() => setLeaveDate(null)} title="Mark as left?" size="sm">
+        <Stack gap="sm">
+          <Text size="sm">
+            <b>{employee?.fullName}</b> will move to former employees. Their record and salary history are kept,
+            and you can reinstate them later.
+          </Text>
+          <TextInput
+            label="Last day of employment"
+            type="date"
+            value={leaveDate ?? ''}
+            min={employee?.hireDate}
+            onChange={(e) => setLeaveDate(e.currentTarget.value)}
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setLeaveDate(null)}>
+              Cancel
+            </Button>
+            <Button color="red" loading={terminate.isPending} disabled={!leaveDate} onClick={() => terminate.mutate(leaveDate!)}>
+              Mark as left
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Drawer>
   );
 }
