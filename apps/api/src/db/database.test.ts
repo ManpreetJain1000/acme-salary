@@ -81,3 +81,32 @@ describe('salary-sort index stays in step with the FX rates', () => {
     expect(sql).toContain(SALARY_USD_SQL);
   });
 });
+
+describe('audit trail (migration 9)', () => {
+  it('makes employment events append-only', () => {
+    const db = openDatabase(':memory:');
+    db.exec(`INSERT INTO employees (employee_code, full_name, email, job_title, department, country,
+               currency, salary_minor, hire_date, created_at, updated_at)
+             VALUES ('EMP-000001', 'A', 'a@acme.example', 'Recruiter', 'People', 'US', 'USD',
+               100, '2020-01-01', '2020-01-01', '2020-01-01');
+             INSERT INTO employment_events (employee_id, event, effective_date, recorded_at)
+             VALUES (1, 'hired', '2020-01-01', '2020-01-01');`);
+    expect(() => db.exec("UPDATE employment_events SET event = 'terminated'")).toThrow(/append-only/);
+    expect(() => db.exec('DELETE FROM employment_events')).toThrow(/append-only/);
+  });
+
+  it('backfills hired and terminated events for existing employees', () => {
+    const db = new Database(':memory:');
+    MIGRATIONS.slice(0, 8).forEach((sql) => db.exec(sql));
+    db.pragma('user_version = 8');
+    db.exec(`INSERT INTO employees (employee_code, full_name, email, job_title, department, country,
+               currency, salary_minor, hire_date, status, terminated_at, created_at, updated_at)
+             VALUES ('EMP-000001', 'Left Already', 'l@acme.example', 'Recruiter', 'People', 'US', 'USD',
+               100, '2020-01-01', 'terminated', '2025-06-30', '2020-01-01', '2025-06-30T10:00:00Z')`);
+    migrate(db);
+    expect(db.prepare('SELECT event, effective_date FROM employment_events ORDER BY id').all()).toEqual([
+      { event: 'hired', effective_date: '2020-01-01' },
+      { event: 'terminated', effective_date: '2025-06-30' },
+    ]);
+  });
+});

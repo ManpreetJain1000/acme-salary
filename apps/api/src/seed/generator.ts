@@ -1,4 +1,4 @@
-import { fromUsdMinor } from '../domain/money.js';
+import { fromUsdMinor, usdRate } from '../domain/money.js';
 import { COUNTRIES, DEPARTMENTS, LEVEL_BANDS_USD } from '../domain/reference.js';
 import { formatEmployeeCode, type EmployeeRow, type SalaryHistoryRow } from '../employees/repository.js';
 import { emailLocalPart, namePoolFor } from './names.js';
@@ -70,11 +70,11 @@ export function generateEmployees(options: SeedOptions = DEFAULT_SEED_OPTIONS): 
       const initial = roundSalary(salaryMinor / (1 + raise));
       const raiseMs = hireMs + intBetween(rng, 365, tenureDays) * DAY_MS;
       history.push(
-        { employee_id: i, old_salary_minor: null, new_salary_minor: initial, old_currency: null, new_currency: country.currency, changed_at: `${hireDate}T00:00:00.000Z` },
-        { employee_id: i, old_salary_minor: initial, new_salary_minor: salaryMinor, old_currency: country.currency, new_currency: country.currency, changed_at: new Date(raiseMs).toISOString() },
+        { employee_id: i, old_salary_minor: null, new_salary_minor: initial, old_currency: null, new_currency: country.currency, changed_at: `${hireDate}T00:00:00.000Z`, changed_by: 'seed', usd_rate: usdRate(country.currency) },
+        { employee_id: i, old_salary_minor: initial, new_salary_minor: salaryMinor, old_currency: country.currency, new_currency: country.currency, changed_at: new Date(raiseMs).toISOString(), changed_by: 'seed', usd_rate: usdRate(country.currency) },
       );
     } else {
-      history.push({ employee_id: i, old_salary_minor: null, new_salary_minor: salaryMinor, old_currency: null, new_currency: country.currency, changed_at: `${hireDate}T00:00:00.000Z` });
+      history.push({ employee_id: i, old_salary_minor: null, new_salary_minor: salaryMinor, old_currency: null, new_currency: country.currency, changed_at: `${hireDate}T00:00:00.000Z`, changed_by: 'seed', usd_rate: usdRate(country.currency) });
     }
 
     result.push({

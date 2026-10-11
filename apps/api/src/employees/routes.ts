@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import type { EmployeeService } from './service.js';
+import { SYSTEM_ACTOR, type EmployeeService } from './service.js';
 import {
   employeeInputSchema,
   employeeUpdateSchema,
@@ -33,6 +33,9 @@ function sendEmployee(res: Response, employee: { version: number }, status = 200
   res.status(status).setHeader('ETag', `"${employee.version}"`).json(employee);
 }
 
+/** Who to attribute a write to: the signed-in HR user (set by requireAuth). */
+const actorOf = (res: Response) => (res.locals.user as string | undefined) ?? SYSTEM_ACTOR;
+
 /** Thin HTTP layer: parse/validate input, call the service, shape the response. */
 export function employeeRoutes(service: EmployeeService): Router {
   const router = Router();
@@ -46,23 +49,26 @@ export function employeeRoutes(service: EmployeeService): Router {
   });
 
   router.post('/', (req, res) => {
-    const created = service.create(employeeInputSchema.parse(req.body));
+    const created = service.create(employeeInputSchema.parse(req.body), actorOf(res));
     res.location(`/api/employees/${created.id}`);
     sendEmployee(res, created, 201);
   });
 
   router.patch('/:id', (req, res) => {
     const id = idParamSchema.parse(req.params.id);
-    sendEmployee(res, service.update(id, employeeUpdateSchema.parse(req.body), expectedVersion(req)));
+    sendEmployee(res, service.update(id, employeeUpdateSchema.parse(req.body), expectedVersion(req), actorOf(res)));
   });
 
   router.post('/:id/terminate', (req, res) => {
     const id = idParamSchema.parse(req.params.id);
-    sendEmployee(res, service.terminate(id, terminateSchema.parse(req.body ?? {}), expectedVersion(req)));
+    sendEmployee(
+      res,
+      service.terminate(id, terminateSchema.parse(req.body ?? {}), expectedVersion(req), actorOf(res)),
+    );
   });
 
   router.post('/:id/reinstate', (req, res) => {
-    sendEmployee(res, service.reinstate(idParamSchema.parse(req.params.id), expectedVersion(req)));
+    sendEmployee(res, service.reinstate(idParamSchema.parse(req.params.id), expectedVersion(req), actorOf(res)));
   });
 
   // Salary records are never hard-deleted; point API clients at the right call.

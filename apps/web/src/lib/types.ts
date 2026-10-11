@@ -29,9 +29,20 @@ export interface SalaryChange {
   oldCurrency: string | null;
   newCurrency: string;
   changedAt: string;
+  /** Who made the change; null for records from before auditing began. */
+  changedBy: string | null;
+  /** USD per unit of newCurrency at the time of the change. */
+  usdRate: number | null;
 }
 
-export type EmployeeDetail = Employee & { salaryHistory: SalaryChange[] };
+export interface EmploymentChange {
+  event: 'hired' | 'terminated' | 'reinstated';
+  effectiveDate: string;
+  recordedAt: string;
+  recordedBy: string | null;
+}
+
+export type EmployeeDetail = Employee & { salaryHistory: SalaryChange[]; employmentHistory: EmploymentChange[] };
 
 export interface EmployeeInput {
   fullName: string;

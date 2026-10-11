@@ -14,6 +14,13 @@ export function toUsdExact(amountMinor: number, currency: CurrencyCode | string)
   return amountMinor * rate;
 }
 
+/** USD per major unit of `currency` from the static table (recorded with each salary change). */
+export function usdRate(currency: CurrencyCode | string): number {
+  const rate = RATES.get(currency as CurrencyCode);
+  if (rate === undefined) throw new Error(`Unsupported currency: ${currency}`);
+  return rate;
+}
+
 /** A single amount in USD cents, rounded once. Use toUsdExact for anything aggregated. */
 export function toUsdMinor(amountMinor: number, currency: CurrencyCode | string): number {
   return Math.round(toUsdExact(amountMinor, currency));

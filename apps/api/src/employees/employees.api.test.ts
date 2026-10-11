@@ -23,7 +23,18 @@ describe('Employees API', () => {
 
       const detail = await request(app).get(`/api/employees/${res.body.id}`).expect(200);
       expect(detail.body.salaryHistory).toEqual([
-        { oldSalaryMinor: null, newSalaryMinor: 240_000_000, oldCurrency: null, newCurrency: 'INR', changedAt: FIXED_NOW },
+        {
+          oldSalaryMinor: null,
+          newSalaryMinor: 240_000_000,
+          oldCurrency: null,
+          newCurrency: 'INR',
+          changedAt: FIXED_NOW,
+          changedBy: 'system', // sign-in is off in this suite; auth.test.ts checks the real user
+          usdRate: 0.0113,
+        },
+      ]);
+      expect(detail.body.employmentHistory).toEqual([
+        { event: 'hired', effectiveDate: '2024-04-01', recordedAt: FIXED_NOW, recordedBy: 'system' },
       ]);
     });
 
@@ -142,6 +153,18 @@ describe('Employees API', () => {
 
       const { body } = await request(app).get(`/api/employees/${e.id}`).expect(200);
       expect(body.salaryHistory).toHaveLength(2);
+    });
+
+    it('records leaving and reinstating as events, newest first, without losing earlier ones', async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput({ hireDate: '2024-04-01' })).expect(201);
+      await request(app).post(`/api/employees/${e.id}/terminate`).set('If-Match', '*').send({ terminationDate: '2026-09-30' }).expect(200);
+      await request(app).post(`/api/employees/${e.id}/reinstate`).set('If-Match', '*').send({}).expect(200);
+      const { body } = await request(app).get(`/api/employees/${e.id}`).expect(200);
+      expect(body.employmentHistory.map((x: { event: string; effectiveDate: string }) => [x.event, x.effectiveDate])).toEqual([
+        ['reinstated', FIXED_NOW.slice(0, 10)],
+        ['terminated', '2026-09-30'],
+        ['hired', '2024-04-01'],
+      ]);
     });
 
     it('defaults the termination date to today', async () => {

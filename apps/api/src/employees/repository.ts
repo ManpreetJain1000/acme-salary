@@ -31,6 +31,21 @@ export interface SalaryHistoryRow {
   old_currency: string | null;
   new_currency: string;
   changed_at: string;
+  /** Signed-in user, "seed", or "system"; NULL for rows from before migration 9. */
+  changed_by: string | null;
+  /** USD per unit of new_currency when the change was made. */
+  usd_rate: number | null;
+}
+
+export type EmploymentEvent = 'hired' | 'terminated' | 'reinstated';
+
+export interface EmploymentEventRow {
+  id: number;
+  employee_id: number;
+  event: EmploymentEvent;
+  effective_date: string;
+  recorded_at: string;
+  recorded_by: string | null;
 }
 
 export type NewEmployeeRow = Omit<EmployeeRow, 'id' | 'status' | 'terminated_at' | 'version'>;
@@ -201,11 +216,28 @@ export class EmployeeRepository {
     this.db
       .prepare(
         `INSERT INTO salary_history
-           (employee_id, old_salary_minor, new_salary_minor, old_currency, new_currency, changed_at)
+           (employee_id, old_salary_minor, new_salary_minor, old_currency, new_currency,
+            changed_at, changed_by, usd_rate)
          VALUES
-           (@employee_id, @old_salary_minor, @new_salary_minor, @old_currency, @new_currency, @changed_at)`,
+           (@employee_id, @old_salary_minor, @new_salary_minor, @old_currency, @new_currency,
+            @changed_at, @changed_by, @usd_rate)`,
       )
       .run(row);
+  }
+
+  insertEmploymentEvent(row: Omit<EmploymentEventRow, 'id'>): void {
+    this.db
+      .prepare(
+        `INSERT INTO employment_events (employee_id, event, effective_date, recorded_at, recorded_by)
+         VALUES (@employee_id, @event, @effective_date, @recorded_at, @recorded_by)`,
+      )
+      .run(row);
+  }
+
+  employmentEvents(employeeId: number): EmploymentEventRow[] {
+    return this.db
+      .prepare('SELECT * FROM employment_events WHERE employee_id = ? ORDER BY recorded_at DESC, id DESC')
+      .all(employeeId) as EmploymentEventRow[];
   }
 
   salaryHistory(employeeId: number): SalaryHistoryRow[] {

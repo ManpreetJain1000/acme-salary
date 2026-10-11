@@ -1,9 +1,11 @@
-import { toUsdMinor } from '../domain/money.js';
+import { toUsdMinor, usdRate } from '../domain/money.js';
 import { badRequest, conflict, notFound, stale } from '../http/errors.js';
 import {
   EmployeeRepository,
   type EmployeeRow,
   type EmployeeStatus,
+  type EmploymentEvent,
+  type EmploymentEventRow,
   type ExpectedVersion,
   type SalaryHistoryRow,
 } from './repository.js';
@@ -35,7 +37,19 @@ export interface SalaryChange {
   oldCurrency: string | null;
   newCurrency: string;
   changedAt: string;
+  changedBy: string | null;
+  usdRate: number | null;
 }
+
+export interface EmploymentChange {
+  event: EmploymentEvent;
+  effectiveDate: string;
+  recordedAt: string;
+  recordedBy: string | null;
+}
+
+/** Who a write is attributed to. Routes always pass the signed-in user. */
+export const SYSTEM_ACTOR = 'system';
 
 export interface Page<T> {
   data: T[];
@@ -81,6 +95,17 @@ function toSalaryChange(row: SalaryHistoryRow): SalaryChange {
     oldCurrency: row.old_currency,
     newCurrency: row.new_currency,
     changedAt: row.changed_at,
+    changedBy: row.changed_by,
+    usdRate: row.usd_rate,
+  };
+}
+
+function toEmploymentChange(row: EmploymentEventRow): EmploymentChange {
+  return {
+    event: row.event,
+    effectiveDate: row.effective_date,
+    recordedAt: row.recorded_at,
+    recordedBy: row.recorded_by,
   };
 }
 
@@ -105,13 +130,17 @@ export class EmployeeService {
     };
   }
 
-  get(id: number): Employee & { salaryHistory: SalaryChange[] } {
+  get(id: number): Employee & { salaryHistory: SalaryChange[]; employmentHistory: EmploymentChange[] } {
     const row = this.repo.findById(id);
     if (!row) throw notFound('Employee');
-    return { ...toEmployee(row), salaryHistory: this.repo.salaryHistory(id).map(toSalaryChange) };
+    return {
+      ...toEmployee(row),
+      salaryHistory: this.repo.salaryHistory(id).map(toSalaryChange),
+      employmentHistory: this.repo.employmentEvents(id).map(toEmploymentChange),
+    };
   }
 
-  create(input: EmployeeInput): Employee {
+  create(input: EmployeeInput, actor: string = SYSTEM_ACTOR): Employee {
     return this.repo.transaction(() => {
       this.assertEmailAvailable(input.email);
       const ts = this.now();
@@ -135,12 +164,21 @@ export class EmployeeService {
         old_currency: null,
         new_currency: input.currency,
         changed_at: ts,
+        changed_by: actor,
+        usd_rate: usdRate(input.currency),
+      });
+      this.repo.insertEmploymentEvent({
+        employee_id: id,
+        event: 'hired',
+        effective_date: input.hireDate,
+        recorded_at: ts,
+        recorded_by: actor,
       });
       return toEmployee(this.repo.findById(id)!);
     });
   }
 
-  update(id: number, patch: EmployeeUpdate, expected: ExpectedVersion): Employee {
+  update(id: number, patch: EmployeeUpdate, expected: ExpectedVersion, actor: string = SYSTEM_ACTOR): Employee {
     return this.repo.transaction(() => {
       const current = this.repo.findById(id);
       if (!current) throw notFound('Employee');
@@ -175,6 +213,8 @@ export class EmployeeService {
           old_currency: current.currency,
           new_currency: next.currency,
           changed_at: ts,
+          changed_by: actor,
+          usd_rate: usdRate(next.currency),
         });
       }
       return toEmployee(this.repo.findById(id)!);
@@ -185,7 +225,12 @@ export class EmployeeService {
    * Record that someone left. Their row and salary history are kept: HR is asked
    * about former employees' pay, and the audit trail must survive (decisions.md D5).
    */
-  terminate(id: number, input: TerminateInput, expected: ExpectedVersion): Employee {
+  terminate(
+    id: number,
+    input: TerminateInput,
+    expected: ExpectedVersion,
+    actor: string = SYSTEM_ACTOR,
+  ): Employee {
     return this.repo.transaction(() => {
       const current = this.repo.findById(id);
       if (!current) throw notFound('Employee');
@@ -197,18 +242,33 @@ export class EmployeeService {
         throw badRequest(`Termination date ${date} is before the hire date ${current.hire_date}`);
       }
       if (!this.repo.setStatus(id, 'terminated', date, ts, expected)) throw stale(current.version + 1);
+      this.repo.insertEmploymentEvent({
+        employee_id: id,
+        event: 'terminated',
+        effective_date: date,
+        recorded_at: ts,
+        recorded_by: actor,
+      });
       return toEmployee(this.repo.findById(id)!);
     });
   }
 
   /** Undo a termination recorded by mistake, or a rehire into the same record. */
-  reinstate(id: number, expected: ExpectedVersion): Employee {
+  reinstate(id: number, expected: ExpectedVersion, actor: string = SYSTEM_ACTOR): Employee {
     return this.repo.transaction(() => {
       const current = this.repo.findById(id);
       if (!current) throw notFound('Employee');
       assertVersion(current, expected);
       if (current.status === 'active') throw conflict(`${current.full_name} is already active`);
-      if (!this.repo.setStatus(id, 'active', null, this.now(), expected)) throw stale(current.version + 1);
+      const ts = this.now();
+      if (!this.repo.setStatus(id, 'active', null, ts, expected)) throw stale(current.version + 1);
+      this.repo.insertEmploymentEvent({
+        employee_id: id,
+        event: 'reinstated',
+        effective_date: ts.slice(0, 10),
+        recorded_at: ts,
+        recorded_by: actor,
+      });
       return toEmployee(this.repo.findById(id)!);
     });
   }

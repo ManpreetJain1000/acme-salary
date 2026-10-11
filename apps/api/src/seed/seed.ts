@@ -34,9 +34,11 @@ export function seedDatabase(
   );
   const insertHistory = db.prepare(
     `INSERT INTO salary_history
-       (employee_id, old_salary_minor, new_salary_minor, old_currency, new_currency, changed_at)
+       (employee_id, old_salary_minor, new_salary_minor, old_currency, new_currency,
+        changed_at, changed_by, usd_rate)
      VALUES
-       (@employee_id, @old_salary_minor, @new_salary_minor, @old_currency, @new_currency, @changed_at)`,
+       (@employee_id, @old_salary_minor, @new_salary_minor, @old_currency, @new_currency,
+        @changed_at, @changed_by, @usd_rate)`,
   );
 
   const run = db.transaction((): Omit<SeedResult, 'durationMs'> => {
@@ -67,6 +69,9 @@ export function seedDatabase(
       }
     }
 
+    // One set-based statement for every "hired" event.
+    db.exec(`INSERT INTO employment_events (employee_id, event, effective_date, recorded_at, recorded_by)
+             SELECT id, 'hired', hire_date, created_at, 'seed' FROM employees`);
     db.exec("INSERT INTO employees_fts (employees_fts) VALUES ('rebuild')");
     db.exec(ftsTrigger);
     return { status: 'seeded', employees: options.count, historyRows };

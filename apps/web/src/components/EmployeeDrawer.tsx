@@ -22,12 +22,25 @@ import { useState } from 'react';
 import { api, isStale } from '@/lib/api';
 import { formatMoney, formatPercent, formatUsd } from '@/lib/format';
 import { useMetaLookups } from '@/lib/hooks';
-import type { SalaryChange } from '@/lib/types';
+import type { EmploymentChange, SalaryChange } from '@/lib/types';
 import { EmployeeForm } from './EmployeeForm';
 
 interface Props {
   employeeId: number | null;
   onClose: () => void;
+}
+
+const EVENT_LABEL: Record<EmploymentChange['event'], string> = {
+  hired: 'Hired',
+  terminated: 'Left',
+  reinstated: 'Reinstated',
+};
+
+/** "seed" and "system" are not people; say so plainly. */
+function byWhom(actor: string | null): string {
+  if (!actor) return 'before audit';
+  if (actor === 'seed') return 'imported';
+  return `by ${actor}`;
 }
 
 function describeChange(c: SalaryChange): { label: string; delta?: string } {
@@ -214,12 +227,27 @@ export function EmployeeDrawer({ employeeId, onClose }: Props) {
                   }
                 >
                   <Text size="xs" c="dimmed">
-                    {label} · {c.changedAt.slice(0, 10)}
+                    {label} · {c.changedAt.slice(0, 10)} · {byWhom(c.changedBy)}
                   </Text>
                 </Timeline.Item>
               );
             })}
           </Timeline>
+
+          <Divider label="Employment" labelPosition="left" />
+          <Stack gap={4}>
+            {employee.employmentHistory.map((e, i) => (
+              <Text key={`${e.recordedAt}-${i}`} size="sm">
+                <Text span fw={600}>
+                  {EVENT_LABEL[e.event]}
+                </Text>{' '}
+                {e.effectiveDate}{' '}
+                <Text span size="xs" c="dimmed">
+                  · recorded {e.recordedAt.slice(0, 10)} {byWhom(e.recordedBy)}
+                </Text>
+              </Text>
+            ))}
+          </Stack>
         </Stack>
       )}
       <Modal opened={leaveDate !== null} onClose={() => setLeaveDate(null)} title="Mark as left?" size="sm">

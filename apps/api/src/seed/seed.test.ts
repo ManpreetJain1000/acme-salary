@@ -80,6 +80,14 @@ describe('seedDatabase', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM employees').get()).toEqual({ n: 20 });
   });
 
+  it('records who and which FX rate for seeded history, and a hired event per employee', () => {
+    const db = openDatabase(':memory:');
+    seedDatabase(db, { count: 50 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM salary_history WHERE changed_by = 'seed' AND usd_rate > 0").get())
+      .toEqual(db.prepare('SELECT COUNT(*) AS n FROM salary_history').get());
+    expect(db.prepare("SELECT COUNT(*) AS n FROM employment_events WHERE event = 'hired'").get()).toEqual({ n: 50 });
+  });
+
   it('keeps search working for seeded and later-added employees', () => {
     const db = openDatabase(':memory:');
     seedDatabase(db, { count: 200 });

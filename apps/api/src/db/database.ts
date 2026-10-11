@@ -156,6 +156,36 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE employees ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
   `,
+
+  // 9: a complete audit trail. Salary history records who made each change and the
+  // FX rate in force (so past USD figures can be reproduced). Leaving and
+  // reinstating become append-only events too, instead of only the latest status.
+  // Rows written before this migration can't be backfilled with who/rate: history
+  // is append-only, so they stay NULL ("before audit").
+  `
+  ALTER TABLE salary_history ADD COLUMN changed_by TEXT;
+  ALTER TABLE salary_history ADD COLUMN usd_rate REAL;
+
+  CREATE TABLE employment_events (
+    id             INTEGER PRIMARY KEY,
+    employee_id    INTEGER NOT NULL REFERENCES employees(id),
+    event          TEXT    NOT NULL CHECK (event IN ('hired', 'terminated', 'reinstated')),
+    effective_date TEXT    NOT NULL,
+    recorded_at    TEXT    NOT NULL,
+    recorded_by    TEXT
+  );
+  CREATE INDEX idx_employment_events_employee ON employment_events(employee_id, recorded_at);
+
+  INSERT INTO employment_events (employee_id, event, effective_date, recorded_at)
+    SELECT id, 'hired', hire_date, created_at FROM employees;
+  INSERT INTO employment_events (employee_id, event, effective_date, recorded_at)
+    SELECT id, 'terminated', terminated_at, updated_at FROM employees WHERE status = 'terminated';
+
+  CREATE TRIGGER employment_events_append_only_update BEFORE UPDATE ON employment_events
+  BEGIN SELECT RAISE(ABORT, 'employment_events is append-only'); END;
+  CREATE TRIGGER employment_events_append_only_delete BEFORE DELETE ON employment_events
+  BEGIN SELECT RAISE(ABORT, 'employment_events is append-only'); END;
+  `,
 ];
 
 export function schemaVersion(db: DB): number {

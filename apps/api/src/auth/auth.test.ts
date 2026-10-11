@@ -120,6 +120,18 @@ describe('sign-in API', () => {
     expect(wrongPassword.body).toEqual(unknownEmail.body);
   });
 
+  it('attributes every change to the signed-in HR user', async () => {
+    const { app } = authApp();
+    const agent = await signIn(app);
+    const { body: e } = await agent.post('/api/employees').send(employeeInput()).expect(201);
+    await agent.patch(`/api/employees/${e.id}`).set('If-Match', `"${e.version}"`).send({ salaryMinor: 300_000_000 }).expect(200);
+    await agent.post(`/api/employees/${e.id}/terminate`).set('If-Match', `"${e.version + 1}"`).send({}).expect(200);
+
+    const { body } = await agent.get(`/api/employees/${e.id}`).expect(200);
+    expect(body.salaryHistory.map((h: { changedBy: string }) => h.changedBy)).toEqual(['hr@acme.example', 'hr@acme.example']);
+    expect(body.employmentHistory.map((h: { recordedBy: string }) => h.recordedBy)).toEqual(['hr@acme.example', 'hr@acme.example']);
+  });
+
   it('expires sessions', async () => {
     const { app, advance } = authApp({ sessionTtlMs: 60_000 });
     const agent = await signIn(app);
