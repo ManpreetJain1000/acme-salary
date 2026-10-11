@@ -1,0 +1,70 @@
+import type {
+  Employee,
+  EmployeeDetail,
+  EmployeeInput,
+  EmployeeQuery,
+  InsightFilter,
+  Meta,
+  Outlier,
+  Page,
+  PayBand,
+  Summary,
+} from './types';
+
+export interface FieldError {
+  path: string;
+  message: string;
+}
+
+/** Error carrying the API's structured payload so forms can show field errors. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly details: FieldError[] = [],
+  ) {
+    super(message);
+  }
+}
+
+/** Build a query string, dropping empty values so URLs stay clean. */
+export function toQueryString(params: object): string {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue;
+    qs.set(key, String(value));
+  }
+  const s = qs.toString();
+  return s ? `?${s}` : '';
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...init?.headers },
+  });
+  if (res.status === 204) return undefined as T;
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = body?.error;
+    throw new ApiError(res.status, err?.code ?? 'UNKNOWN', err?.message ?? res.statusText, err?.details ?? []);
+  }
+  return body as T;
+}
+
+export const api = {
+  meta: () => request<Meta>('/api/meta'),
+  listEmployees: (q: EmployeeQuery) => request<Page<Employee>>(`/api/employees${toQueryString(q)}`),
+  getEmployee: (id: number) => request<EmployeeDetail>(`/api/employees/${id}`),
+  createEmployee: (input: EmployeeInput) =>
+    request<Employee>('/api/employees', { method: 'POST', body: JSON.stringify(input) }),
+  updateEmployee: (id: number, patch: Partial<EmployeeInput>) =>
+    request<Employee>(`/api/employees/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteEmployee: (id: number) => request<void>(`/api/employees/${id}`, { method: 'DELETE' }),
+  summary: (f: InsightFilter) => request<Summary>(`/api/insights/summary${toQueryString(f)}`),
+  payBands: (f: InsightFilter) =>
+    request<{ data: PayBand[] }>(`/api/insights/pay-bands${toQueryString(f)}`).then((r) => r.data),
+  outliers: (f: InsightFilter & { threshold: number }) =>
+    request<{ total: number; data: Outlier[] }>(`/api/insights/outliers${toQueryString(f)}`),
+};
