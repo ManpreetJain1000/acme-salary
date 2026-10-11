@@ -19,7 +19,7 @@ import { notifications } from '@mantine/notifications';
 import { IconAlertCircle, IconArrowBackUp, IconDoorExit, IconPencil } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { api } from '@/lib/api';
+import { api, isStale } from '@/lib/api';
 import { formatMoney, formatPercent, formatUsd } from '@/lib/format';
 import { useMetaLookups } from '@/lib/hooks';
 import type { SalaryChange } from '@/lib/types';
@@ -52,8 +52,18 @@ export function EmployeeDrawer({ employeeId, onClose }: Props) {
 
   const invalidate = () => queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'meta' });
 
+  // Someone else saved first: reload their version so this user sees it before retrying.
+  const reloadIfStale = (err: Error) => {
+    if (isStale(err)) void queryClient.invalidateQueries({ queryKey: ['employee', employeeId] });
+  };
+
   const update = useMutation({
-    mutationFn: (input: Parameters<typeof api.updateEmployee>[1]) => api.updateEmployee(employeeId!, input),
+    mutationFn: (input: Parameters<typeof api.updateEmployee>[2]) =>
+      api.updateEmployee(employeeId!, employee!.version, input),
+    onError: (err) => {
+      if (isStale(err)) setEditing(false); // close the form on the outdated copy
+      reloadIfStale(err);
+    },
     onSuccess: async () => {
       await invalidate();
       setEditing(false);
@@ -61,11 +71,14 @@ export function EmployeeDrawer({ employeeId, onClose }: Props) {
     },
   });
 
-  const showError = (err: Error) => notifications.show({ color: 'red', message: err.message });
+  const showError = (err: Error) => {
+    notifications.show({ color: 'red', message: err.message });
+    reloadIfStale(err);
+  };
 
   // Leaving keeps the record and its salary history; it can be undone with Reinstate.
   const terminate = useMutation({
-    mutationFn: (date: string) => api.terminateEmployee(employeeId!, date),
+    mutationFn: (date: string) => api.terminateEmployee(employeeId!, employee!.version, date),
     onSuccess: async (e) => {
       setLeaveDate(null);
       await invalidate();
@@ -75,7 +88,7 @@ export function EmployeeDrawer({ employeeId, onClose }: Props) {
   });
 
   const reinstate = useMutation({
-    mutationFn: () => api.reinstateEmployee(employeeId!),
+    mutationFn: () => api.reinstateEmployee(employeeId!, employee!.version),
     onSuccess: async (e) => {
       await invalidate();
       notifications.show({ color: 'green', message: `${e.fullName} reinstated` });

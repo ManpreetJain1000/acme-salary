@@ -66,7 +66,7 @@ describe('Employees API', () => {
       const { body: created } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
 
       const res = await request(app)
-        .patch(`/api/employees/${created.id}`)
+        .patch(`/api/employees/${created.id}`).set('If-Match', '*')
         .send({ salaryMinor: 260_000_000 })
         .expect(200);
       expect(res.body.salaryMinor).toBe(260_000_000);
@@ -78,7 +78,7 @@ describe('Employees API', () => {
 
     it('does not write history when salary is unchanged', async () => {
       const { body: created } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
-      await request(app).patch(`/api/employees/${created.id}`).send({ jobTitle: 'Senior Software Engineer' }).expect(200);
+      await request(app).patch(`/api/employees/${created.id}`).set('If-Match', '*').send({ jobTitle: 'Senior Software Engineer' }).expect(200);
 
       const { body } = await request(app).get(`/api/employees/${created.id}`);
       expect(body.salaryHistory).toHaveLength(1);
@@ -87,18 +87,55 @@ describe('Employees API', () => {
 
     it('rejects an empty patch and unknown ids', async () => {
       const { body: created } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
-      await request(app).patch(`/api/employees/${created.id}`).send({}).expect(400);
-      await request(app).patch('/api/employees/9999').send({ fullName: 'Nobody Here' }).expect(404);
+      await request(app).patch(`/api/employees/${created.id}`).set('If-Match', '*').send({}).expect(400);
+      await request(app).patch('/api/employees/9999').set('If-Match', '*').send({ fullName: 'Nobody Here' }).expect(404);
+    });
+  });
+
+  describe('optimistic locking (no silent overwrites)', () => {
+    it('returns the version as an ETag and bumps it on every change', async () => {
+      const { body: e, headers } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
+      expect(e.version).toBe(1);
+      expect(headers.etag).toBe('"1"');
+      const res = await request(app).patch(`/api/employees/${e.id}`).set('If-Match', '"1"').send({ salaryMinor: 1_000 }).expect(200);
+      expect(res.body.version).toBe(2);
+      expect((await request(app).get(`/api/employees/${e.id}`)).headers.etag).toBe('"2"');
+    });
+
+    it('rejects a save based on an out-of-date copy with 412, keeping the other change', async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
+      // Two HR users open version 1. The first saves a raise...
+      await request(app).patch(`/api/employees/${e.id}`).set('If-Match', '"1"').send({ salaryMinor: 300_000_000 }).expect(200);
+      // ...the second, still on version 1, must not silently overwrite it.
+      const res = await request(app).patch(`/api/employees/${e.id}`).set('If-Match', '"1"').send({ salaryMinor: 1 }).expect(412);
+      expect(res.body.error).toMatchObject({ code: 'STALE', details: { currentVersion: 2 } });
+      expect((await request(app).get(`/api/employees/${e.id}`)).body.salaryMinor).toBe(300_000_000);
+    });
+
+    it('applies the same rule to leaving and reinstating', async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
+      await request(app).patch(`/api/employees/${e.id}`).set('If-Match', '"1"').send({ fullName: 'Renamed Person' }).expect(200);
+      await request(app).post(`/api/employees/${e.id}/terminate`).set('If-Match', '"1"').send({}).expect(412);
+      await request(app).post(`/api/employees/${e.id}/terminate`).set('If-Match', '"2"').send({}).expect(200);
+      await request(app).post(`/api/employees/${e.id}/reinstate`).set('If-Match', '"2"').send({}).expect(412);
+    });
+
+    it('requires If-Match on writes (428), accepts * to overwrite deliberately, and rejects garbage', async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
+      const res = await request(app).patch(`/api/employees/${e.id}`).send({ fullName: 'No Header' }).expect(428);
+      expect(res.body.error.code).toBe('PRECONDITION_REQUIRED');
+      await request(app).patch(`/api/employees/${e.id}`).set('If-Match', 'nonsense').send({ fullName: 'Bad Header' }).expect(400);
+      await request(app).patch(`/api/employees/${e.id}`).set('If-Match', '*').send({ fullName: 'Star Overwrite' }).expect(200);
     });
   });
 
   describe('leaving: terminate and reinstate (no hard delete)', () => {
     it('terminates instead of deleting, keeping the record and its salary history', async () => {
       const { body: e } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
-      await request(app).patch(`/api/employees/${e.id}`).send({ salaryMinor: 250_000_000 }).expect(200);
+      await request(app).patch(`/api/employees/${e.id}`).set('If-Match', '*').send({ salaryMinor: 250_000_000 }).expect(200);
 
       const res = await request(app)
-        .post(`/api/employees/${e.id}/terminate`)
+        .post(`/api/employees/${e.id}/terminate`).set('If-Match', '*')
         .send({ terminationDate: '2026-09-30' })
         .expect(200);
       expect(res.body).toMatchObject({ status: 'terminated', terminatedAt: '2026-09-30' });
@@ -109,7 +146,7 @@ describe('Employees API', () => {
 
     it('defaults the termination date to today', async () => {
       const { body: e } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
-      const res = await request(app).post(`/api/employees/${e.id}/terminate`).send({}).expect(200);
+      const res = await request(app).post(`/api/employees/${e.id}/terminate`).set('If-Match', '*').send({}).expect(200);
       expect(res.body.terminatedAt).toBe(FIXED_NOW.slice(0, 10));
     });
 
@@ -123,7 +160,7 @@ describe('Employees API', () => {
     it('hides former employees from the directory unless asked', async () => {
       const { body: e } = await request(app).post('/api/employees').send(employeeInput({ fullName: 'Gone Person' })).expect(201);
       await request(app).post('/api/employees').send(employeeInput({ fullName: 'Still Here' })).expect(201);
-      await request(app).post(`/api/employees/${e.id}/terminate`).send({}).expect(200);
+      await request(app).post(`/api/employees/${e.id}/terminate`).set('If-Match', '*').send({}).expect(200);
 
       const names = async (qs: string) =>
         (await request(app).get(`/api/employees${qs}`).expect(200)).body.data.map((x: { fullName: string }) => x.fullName);
@@ -134,26 +171,26 @@ describe('Employees API', () => {
 
     it('blocks edits to a former employee until reinstated', async () => {
       const { body: e } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
-      await request(app).post(`/api/employees/${e.id}/terminate`).send({}).expect(200);
-      await request(app).patch(`/api/employees/${e.id}`).send({ salaryMinor: 1_000 }).expect(409);
+      await request(app).post(`/api/employees/${e.id}/terminate`).set('If-Match', '*').send({}).expect(200);
+      await request(app).patch(`/api/employees/${e.id}`).set('If-Match', '*').send({ salaryMinor: 1_000 }).expect(409);
 
-      const res = await request(app).post(`/api/employees/${e.id}/reinstate`).send({}).expect(200);
+      const res = await request(app).post(`/api/employees/${e.id}/reinstate`).set('If-Match', '*').send({}).expect(200);
       expect(res.body).toMatchObject({ status: 'active', terminatedAt: null });
-      await request(app).patch(`/api/employees/${e.id}`).send({ salaryMinor: 1_000 }).expect(200);
+      await request(app).patch(`/api/employees/${e.id}`).set('If-Match', '*').send({ salaryMinor: 1_000 }).expect(200);
     });
 
     it('rejects double termination, reinstating an active employee and a date before hire', async () => {
       const { body: e } = await request(app).post('/api/employees').send(employeeInput({ hireDate: '2024-04-01' })).expect(201);
-      await request(app).post(`/api/employees/${e.id}/terminate`).send({ terminationDate: '2024-03-31' }).expect(400);
-      await request(app).post(`/api/employees/${e.id}/reinstate`).send({}).expect(409);
-      await request(app).post(`/api/employees/${e.id}/terminate`).send({}).expect(200);
-      await request(app).post(`/api/employees/${e.id}/terminate`).send({}).expect(409);
-      await request(app).post('/api/employees/9999/terminate').send({}).expect(404);
+      await request(app).post(`/api/employees/${e.id}/terminate`).set('If-Match', '*').send({ terminationDate: '2024-03-31' }).expect(400);
+      await request(app).post(`/api/employees/${e.id}/reinstate`).set('If-Match', '*').send({}).expect(409);
+      await request(app).post(`/api/employees/${e.id}/terminate`).set('If-Match', '*').send({}).expect(200);
+      await request(app).post(`/api/employees/${e.id}/terminate`).set('If-Match', '*').send({}).expect(409);
+      await request(app).post('/api/employees/9999/terminate').set('If-Match', '*').send({}).expect(404);
     });
 
     it("explains when a new hire's email belongs to a former employee", async () => {
       const { body: e } = await request(app).post('/api/employees').send(employeeInput({ email: 'back@acme.example' })).expect(201);
-      await request(app).post(`/api/employees/${e.id}/terminate`).send({}).expect(200);
+      await request(app).post(`/api/employees/${e.id}/terminate`).set('If-Match', '*').send({}).expect(200);
       const res = await request(app).post('/api/employees').send(employeeInput({ email: 'back@acme.example' })).expect(409);
       expect(res.body.error.message).toMatch(/former employee EMP-000001; reinstate/);
     });

@@ -34,7 +34,7 @@ describe('search (FTS5 trigram index)', () => {
   it('stays in sync when a name changes', () => {
     const { repo, service } = setup();
     const e = service.create(employeeInput({ fullName: 'Old Name' }));
-    service.update(e.id, { fullName: 'New Person' });
+    service.update(e.id, { fullName: 'New Person' }, null);
     expect(repo.list(q({ search: 'Old Name' })).total).toBe(0);
     expect(repo.list(q({ search: 'New Pers' })).total).toBe(1);
   });

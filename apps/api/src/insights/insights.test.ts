@@ -43,7 +43,7 @@ describe('InsightService', () => {
     const employees = new EmployeeService(repo);
     const leaver = employees.create(employeeInput({ country: 'US', currency: 'USD', salaryMinor: 999_999_00 }));
     employees.create(employeeInput({ country: 'US', currency: 'USD', salaryMinor: 100_000_00 }));
-    employees.terminate(leaver.id, {});
+    employees.terminate(leaver.id, {}, null);
     expect(new InsightService(repo).summary({})).toMatchObject({ headcount: 1, totalPayrollUsdMinor: 100_000_00 });
   });
 

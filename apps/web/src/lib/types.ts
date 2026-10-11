@@ -12,6 +12,8 @@ export interface Employee {
   salaryMinor: number;
   salaryUsdMinor: number;
   hireDate: string;
+  /** Optimistic-locking version; sent back as If-Match on every change. */
+  version: number;
   status: EmployeeStatus;
   /** Last day of employment, YYYY-MM-DD; null while active. */
   terminatedAt: string | null;

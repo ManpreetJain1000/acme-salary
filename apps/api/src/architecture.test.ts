@@ -9,7 +9,8 @@ import { describe, expect, it } from 'vitest';
  */
 const SRC = new URL('.', import.meta.url).pathname;
 const ALLOWED = ['employees/repository.ts', 'db/', 'seed/seed.ts', 'architecture.test.ts'];
-const SQL_SIGNS = [/\.prepare\(/, /\.exec\(/, /(?<!repo)\.transaction\(/, /\bSELECT\s/, /\bINSERT\s+INTO\b/, /better-sqlite3/];
+// db.exec, not any .exec: RegExp#exec is fine anywhere.
+const SQL_SIGNS = [/\.prepare\(/, /\bdb\.exec\(/, /(?<!repo)\.transaction\(/, /\bSELECT\s/, /\bINSERT\s+INTO\b/, /better-sqlite3/];
 
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

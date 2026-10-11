@@ -71,6 +71,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+const ifMatch = (version: number) => ({ 'If-Match': `"${version}"` });
+
+/** True when a save lost a race with someone else's change (HTTP 412). */
+export const isStale = (err: unknown) => err instanceof ApiError && err.code === 'STALE';
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ email: string }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
@@ -83,15 +88,22 @@ export const api = {
   getEmployee: (id: number) => request<EmployeeDetail>(`/api/employees/${id}`),
   createEmployee: (input: EmployeeInput) =>
     request<Employee>('/api/employees', { method: 'POST', body: JSON.stringify(input) }),
-  updateEmployee: (id: number, patch: Partial<EmployeeInput>) =>
-    request<Employee>(`/api/employees/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-  terminateEmployee: (id: number, terminationDate?: string) =>
+  // Every change names the version it was based on, so a stale copy gets 412
+  // instead of silently overwriting someone else's edit.
+  updateEmployee: (id: number, version: number, patch: Partial<EmployeeInput>) =>
+    request<Employee>(`/api/employees/${id}`, {
+      method: 'PATCH',
+      headers: ifMatch(version),
+      body: JSON.stringify(patch),
+    }),
+  terminateEmployee: (id: number, version: number, terminationDate?: string) =>
     request<Employee>(`/api/employees/${id}/terminate`, {
       method: 'POST',
+      headers: ifMatch(version),
       body: JSON.stringify(terminationDate ? { terminationDate } : {}),
     }),
-  reinstateEmployee: (id: number) =>
-    request<Employee>(`/api/employees/${id}/reinstate`, { method: 'POST', body: '{}' }),
+  reinstateEmployee: (id: number, version: number) =>
+    request<Employee>(`/api/employees/${id}/reinstate`, { method: 'POST', headers: ifMatch(version), body: '{}' }),
   summary: (f: InsightFilter) => request<Summary>(`/api/insights/summary${toQueryString(f)}`),
   payBands: (f: InsightFilter) =>
     request<{ data: PayBand[] }>(`/api/insights/pay-bands${toQueryString(f)}`).then((r) => r.data),

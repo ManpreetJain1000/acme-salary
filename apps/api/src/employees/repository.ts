@@ -13,6 +13,8 @@ export interface EmployeeRow {
   currency: string;
   salary_minor: number;
   hire_date: string;
+  /** Optimistic-locking counter, bumped by every update (migration 8). */
+  version: number;
   status: EmployeeStatus;
   terminated_at: string | null;
   created_at: string;
@@ -31,7 +33,10 @@ export interface SalaryHistoryRow {
   changed_at: string;
 }
 
-export type NewEmployeeRow = Omit<EmployeeRow, 'id' | 'status' | 'terminated_at'>;
+export type NewEmployeeRow = Omit<EmployeeRow, 'id' | 'status' | 'terminated_at' | 'version'>;
+
+/** The version a write was based on; null = overwrite whatever is there (If-Match: *). */
+export type ExpectedVersion = number | null;
 
 /** Narrow row for statistics: only what pay groups and outliers need. */
 export interface SalaryRow {
@@ -151,27 +156,45 @@ export class EmployeeRepository {
     return Number(result.lastInsertRowid);
   }
 
+  /**
+   * Compare-and-set: writes only if the row is still at `expected` (or null = any).
+   * Returns false when someone else changed it first.
+   */
   update(
     id: number,
-    row: Omit<EmployeeRow, 'id' | 'employee_code' | 'created_at' | 'status' | 'terminated_at'>,
-  ): void {
-    this.db
-      .prepare(
-        `UPDATE employees SET
-           full_name = @full_name, email = @email, job_title = @job_title,
-           department = @department, country = @country, currency = @currency,
-           salary_minor = @salary_minor, hire_date = @hire_date, updated_at = @updated_at
-         WHERE id = @id`,
-      )
-      .run({ ...row, id });
+    row: Omit<EmployeeRow, 'id' | 'employee_code' | 'created_at' | 'status' | 'terminated_at' | 'version'>,
+    expected: ExpectedVersion,
+  ): boolean {
+    return (
+      this.db
+        .prepare(
+          `UPDATE employees SET
+             full_name = @full_name, email = @email, job_title = @job_title,
+             department = @department, country = @country, currency = @currency,
+             salary_minor = @salary_minor, hire_date = @hire_date, updated_at = @updated_at,
+             version = version + 1
+           WHERE id = @id AND (@expected IS NULL OR version = @expected)`,
+        )
+        .run({ ...row, id, expected }).changes > 0
+    );
   }
 
-  setStatus(id: number, status: EmployeeStatus, terminatedAt: string | null, updatedAt: string): void {
-    this.db
-      .prepare(
-        'UPDATE employees SET status = ?, terminated_at = ?, updated_at = ? WHERE id = ?',
-      )
-      .run(status, terminatedAt, updatedAt, id);
+  setStatus(
+    id: number,
+    status: EmployeeStatus,
+    terminatedAt: string | null,
+    updatedAt: string,
+    expected: ExpectedVersion,
+  ): boolean {
+    return (
+      this.db
+        .prepare(
+          `UPDATE employees SET status = @status, terminated_at = @terminatedAt,
+             updated_at = @updatedAt, version = version + 1
+           WHERE id = @id AND (@expected IS NULL OR version = @expected)`,
+        )
+        .run({ id, status, terminatedAt, updatedAt, expected }).changes > 0
+    );
   }
 
   insertSalaryHistory(row: Omit<SalaryHistoryRow, 'id'>): void {

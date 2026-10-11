@@ -1,9 +1,10 @@
 import { toUsdMinor } from '../domain/money.js';
-import { badRequest, conflict, notFound } from '../http/errors.js';
+import { badRequest, conflict, notFound, stale } from '../http/errors.js';
 import {
   EmployeeRepository,
   type EmployeeRow,
   type EmployeeStatus,
+  type ExpectedVersion,
   type SalaryHistoryRow,
 } from './repository.js';
 import type { EmployeeInput, EmployeeUpdate, ListQuery, TerminateInput } from './schemas.js';
@@ -20,6 +21,8 @@ export interface Employee {
   salaryMinor: number;
   salaryUsdMinor: number;
   hireDate: string;
+  /** Send back as If-Match ("<version>") when changing this employee. */
+  version: number;
   status: EmployeeStatus;
   terminatedAt: string | null;
   createdAt: string;
@@ -45,6 +48,11 @@ export interface Page<T> {
 export type Clock = () => string;
 const systemClock: Clock = () => new Date().toISOString();
 
+/** Throw 412 if the caller's copy is out of date (null = caller chose to overwrite). */
+function assertVersion(current: EmployeeRow, expected: ExpectedVersion): void {
+  if (expected !== null && current.version !== expected) throw stale(current.version);
+}
+
 export function toEmployee(row: EmployeeRow): Employee {
   return {
     id: row.id,
@@ -58,6 +66,7 @@ export function toEmployee(row: EmployeeRow): Employee {
     salaryMinor: row.salary_minor,
     salaryUsdMinor: toUsdMinor(row.salary_minor, row.currency),
     hireDate: row.hire_date,
+    version: row.version,
     status: row.status,
     terminatedAt: row.terminated_at,
     createdAt: row.created_at,
@@ -131,10 +140,11 @@ export class EmployeeService {
     });
   }
 
-  update(id: number, patch: EmployeeUpdate): Employee {
+  update(id: number, patch: EmployeeUpdate, expected: ExpectedVersion): Employee {
     return this.repo.transaction(() => {
       const current = this.repo.findById(id);
       if (!current) throw notFound('Employee');
+      assertVersion(current, expected);
       if (current.status === 'terminated') {
         throw conflict(`${current.full_name} has left; reinstate them before making changes`);
       }
@@ -152,7 +162,8 @@ export class EmployeeService {
         hire_date: patch.hireDate ?? current.hire_date,
         updated_at: ts,
       };
-      this.repo.update(id, next);
+      // Compare-and-set as well as the check above: correct even if a write slips between.
+      if (!this.repo.update(id, next, expected)) throw stale(this.repo.findById(id)!.version);
 
       const salaryChanged =
         next.salary_minor !== current.salary_minor || next.currency !== current.currency;
@@ -174,28 +185,30 @@ export class EmployeeService {
    * Record that someone left. Their row and salary history are kept: HR is asked
    * about former employees' pay, and the audit trail must survive (decisions.md D5).
    */
-  terminate(id: number, input: TerminateInput): Employee {
+  terminate(id: number, input: TerminateInput, expected: ExpectedVersion): Employee {
     return this.repo.transaction(() => {
       const current = this.repo.findById(id);
       if (!current) throw notFound('Employee');
+      assertVersion(current, expected);
       if (current.status === 'terminated') throw conflict(`${current.full_name} has already left`);
       const ts = this.now();
       const date = input.terminationDate ?? ts.slice(0, 10);
       if (date < current.hire_date) {
         throw badRequest(`Termination date ${date} is before the hire date ${current.hire_date}`);
       }
-      this.repo.setStatus(id, 'terminated', date, ts);
+      if (!this.repo.setStatus(id, 'terminated', date, ts, expected)) throw stale(current.version + 1);
       return toEmployee(this.repo.findById(id)!);
     });
   }
 
   /** Undo a termination recorded by mistake, or a rehire into the same record. */
-  reinstate(id: number): Employee {
+  reinstate(id: number, expected: ExpectedVersion): Employee {
     return this.repo.transaction(() => {
       const current = this.repo.findById(id);
       if (!current) throw notFound('Employee');
+      assertVersion(current, expected);
       if (current.status === 'active') throw conflict(`${current.full_name} is already active`);
-      this.repo.setStatus(id, 'active', null, this.now());
+      if (!this.repo.setStatus(id, 'active', null, this.now(), expected)) throw stale(current.version + 1);
       return toEmployee(this.repo.findById(id)!);
     });
   }

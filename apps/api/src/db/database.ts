@@ -148,6 +148,14 @@ export const MIGRATIONS: readonly string[] = [
     VALUES (new.id, new.full_name, new.email, new.employee_code);
   END;
   `,
+
+  // 8: optimistic locking. Two HR users editing the same employee used to mean the
+  // last save silently won. Every write now bumps version and must name the version
+  // it was based on (If-Match). A counter, not updated_at: two saves can share a
+  // millisecond.
+  `
+  ALTER TABLE employees ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+  `,
 ];
 
 export function schemaVersion(db: DB): number {

@@ -16,6 +16,13 @@ export class AppError extends Error {
 export const notFound = (what: string) => new AppError(404, 'NOT_FOUND', `${what} not found`);
 export const conflict = (message: string) => new AppError(409, 'CONFLICT', message);
 export const badRequest = (message: string) => new AppError(400, 'BAD_REQUEST', message);
+export const stale = (currentVersion: number) =>
+  new AppError(
+    412,
+    'STALE',
+    'Someone else changed this employee after you opened it. Reload to see the latest version.',
+    { currentVersion },
+  );
 
 export const notFoundHandler: RequestHandler = (_req, _res, next) => {
   next(new AppError(404, 'NOT_FOUND', 'Route not found'));
