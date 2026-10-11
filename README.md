@@ -42,13 +42,13 @@ The database is seeded deterministically on first boot. On free tiers with ephem
 
 ## Stack and why
 - **API:** Node + TypeScript, Express 5, `better-sqlite3`, zod. A small, explicit stack with synchronous transactions.
-- **DB:** SQLite (WAL). Right-sized for 10k rows; the repository layer is the only code that changes for Postgres.
+- **DB:** SQLite (WAL) with versioned migrations. Right-sized for 10k rows; all application SQL sits in one repository layer (enforced by a test), so services and routes don't change for Postgres.
 - **UI:** Next.js (App Router) + Mantine + React Query + Mantine Charts.
 - **Tests:** Vitest + Supertest, deterministic, no network, fixed clock and seed.
 
 ## Engineering highlights
 - **Money is integer minor units** in the employee's local currency. USD is derived at read time from a dated static FX table and never stored over the original.
-- **Every salary change writes history in the same transaction** as the update.
+- **The salary audit trail can't be lost:** every change writes history in the same transaction, people who leave are terminated (not deleted), and database triggers reject any edit or delete of history.
 - **Seed:** a seeded PRNG and fixed reference date (same data everywhere); one `BEGIN IMMEDIATE` transaction (all or nothing); the emptiness check runs inside the transaction, so concurrent boots can't double-seed. 10k employees in ~0.4 s.
 - **Security hygiene:**
   - zod validation on every input;

@@ -10,6 +10,7 @@ Tell it as the HR manager's day, not as a feature tour.
 - Filter Country = India, Department = Engineering. Sort by Salary and mention it sorts by USD equivalent across currencies.
 - Open an employee. Show local salary, the ≈ USD value and the salary history timeline.
 - Edit: give a 10% raise and save. The timeline shows a new "Raise +10%" entry, written in the same transaction as the update.
+- Mark as left: pick the last day. They disappear from Current, appear under Former with their history intact, and drop out of insights. Mention that the database itself refuses to delete history. Reinstate to undo.
 
 **1:20 · Data quality (30 s)**
 - Add employee: submit empty to show validation. Enter an existing email to show the inline conflict error from the server. Pick Germany and the currency defaults to EUR.

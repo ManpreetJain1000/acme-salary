@@ -16,7 +16,7 @@ Replace the Excel workflow ACME's HR team uses to manage salary data for ~10,000
 
 ## Scope (MVP)
 - **Employee directory** — server-side pagination, search (name/email/code), filters (country, department, job title), sortable columns.
-- **Create / edit / delete employee** with validation on both client and server.
+- **Create / edit employees, and record leavers** (terminate / reinstate, never hard delete, so the pay history survives) with validation on both client and server.
 - **Multi-currency salaries** — stored in the employee's local currency as integer minor units; USD-normalised at read time using a dated, static FX table so countries are comparable.
 - **Salary history** — every salary change writes an immutable history row.
 - **Insights dashboard** — answers Q2–Q4.
@@ -35,7 +35,7 @@ Replace the Excel workflow ACME's HR team uses to manage salary data for ~10,000
 | Horizontal scaling infra | 10k rows fit comfortably in SQLite; the scaling path is documented in `decisions.md`, not built. |
 
 ## Non-functional requirements
-- **Correctness of money** — no floating point storage; integer minor units; rounding only at display.
+- **Correctness of money**: no floating point storage; integer minor units; derived values (USD conversions, totals, percentiles) computed exactly and rounded once, at the end.
 - **Performance** — list and insights endpoints < 100 ms on 10k rows; first page of UI interactive quickly.
 - **Security hygiene** — schema validation on every input, parameterised SQL only, allow-listed sort/filter fields, capped page size, no stack traces or salary data in logs/errors.
 - **Operability** — one command to install, seed and run; deterministic seed so demo, tests and deployment show the same data.
