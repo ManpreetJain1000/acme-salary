@@ -2,6 +2,7 @@ import cors from 'cors';
 import express, { type Express } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
+import { authRoutes, requireAuth, requireJsonForWrites, type AuthOptions } from './auth/auth.js';
 import type { DB } from './db/database.js';
 import {
   COUNTRIES,
@@ -24,11 +25,13 @@ export interface AppOptions {
   corsOrigin?: string | string[];
   now?: Clock;
   logger: Logger;
+  /** HR sign-in. `false` only in tests that exercise business logic, never in server.ts. */
+  auth: AuthOptions | false;
   /** Requests per minute per client IP across /api (health excluded). */
   rateLimitPerMinute?: number;
 }
 
-export function createApp({ db, corsOrigin, now, logger, rateLimitPerMinute = 600 }: AppOptions): Express {
+export function createApp({ db, corsOrigin, now, logger, auth, rateLimitPerMinute = 600 }: AppOptions): Express {
   const app = express();
 
   app.disable('x-powered-by');
@@ -60,6 +63,15 @@ export function createApp({ db, corsOrigin, now, logger, rateLimitPerMinute = 60
       },
     }),
   );
+
+  app.use('/api', requireJsonForWrites);
+
+  // Everything below /api/auth requires a signed-in HR user. Health stays public.
+  if (auth) {
+    app.use('/api/auth', authRoutes(auth));
+    const signedIn = requireAuth(auth);
+    for (const path of ['/api/meta', '/api/employees', '/api/insights']) app.use(path, signedIn);
+  }
 
   // Reference data for dropdowns, so the UI never hard-codes lists the API validates.
   app.get('/api/meta', (_req, res) => {
