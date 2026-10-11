@@ -1,13 +1,14 @@
 import { createApp } from './app.js';
 import { openDatabase } from './db/database.js';
+import { silentLogger, type Logger } from './http/logger.js';
 import type { EmployeeInput } from './employees/schemas.js';
 
 export const FIXED_NOW = '2026-10-01T09:00:00.000Z';
 
 /** Fresh in-memory database + app per test: isolated, fast, deterministic. */
-export function setupTestApp() {
+export function setupTestApp(options: { logger?: Logger; rateLimitPerMinute?: number } = {}) {
   const db = openDatabase(':memory:');
-  const app = createApp({ db, now: () => FIXED_NOW });
+  const app = createApp({ db, now: () => FIXED_NOW, logger: silentLogger, ...options });
   return { db, app };
 }
 
