@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { CURRENCIES } from '../domain/reference.js';
 
 export type DB = Database.Database;
 
@@ -16,8 +17,26 @@ export function openDatabase(filename: string): DB {
   // Wait briefly instead of failing immediately when another connection is writing.
   db.pragma('busy_timeout = 5000');
   migrate(db);
+  // Keep planner statistics fresh. Without them SQLite guessed and used the
+  // (status, salary) index for country filters: 130 ms instead of 14 ms at 100k.
+  // 0x10002 = analyse any table whose stats are missing or stale (SQLite's advice
+  // for long-lived connections). No analysis_limit: sampled stats misled the
+  // planner the same way, and a full ANALYZE costs ~150 ms at 100k rows.
+  db.pragma('optimize = 0x10002');
   return db;
 }
+
+/**
+ * USD-equivalent salary as a SQL expression, built only from the static FX table
+ * (trusted constants, never user input). Sorting raw salary_minor would rank
+ * INR 2,000,000 (~$22.6k) above USD 150,000. The salary-sort index (migration 6)
+ * is built on this exact text: SQLite uses an expression index only when the query
+ * repeats the expression verbatim. If rates change, add a migration that rebuilds
+ * the index (database.test.ts fails until you do); results stay correct either way.
+ */
+export const SALARY_USD_SQL = `(salary_minor * CASE currency ${CURRENCIES.map(
+  (c) => `WHEN '${c.code}' THEN ${c.usdRate}`,
+).join(' ')} END)`;
 
 /**
  * Ordered, append-only schema migrations. The database's `user_version` records how
@@ -99,6 +118,35 @@ export const MIGRATIONS: readonly string[] = [
   BEGIN UPDATE app_meta SET value = value + 1 WHERE key = 'data_version'; END;
   CREATE TRIGGER employees_bump_version_update AFTER UPDATE ON employees
   BEGIN UPDATE app_meta SET value = value + 1 WHERE key = 'data_version'; END;
+  `,
+
+  // 6: sorting by salary (USD) read and sorted every row: 650 ms for the deepest
+  // page at 100k employees. An index on the expression serves it in order.
+  `
+  CREATE INDEX idx_employees_status_salary_usd ON employees(status, ${SALARY_USD_SQL});
+  `,
+
+  // 7: name/email/code search used LIKE '%term%', a full scan (170 ms at 100k).
+  // FTS5 with the trigram tokenizer indexes substrings, so "harm" still finds
+  // "Sharma"; remove_diacritics lets "muller" find "Müller". Kept in sync by triggers
+  // (employees are never deleted, so no delete trigger is needed).
+  `
+  CREATE VIRTUAL TABLE employees_fts USING fts5(
+    full_name, email, employee_code,
+    content = 'employees', content_rowid = 'id',
+    tokenize = 'trigram remove_diacritics 1'
+  );
+  INSERT INTO employees_fts (employees_fts) VALUES ('rebuild');
+  CREATE TRIGGER employees_fts_insert AFTER INSERT ON employees BEGIN
+    INSERT INTO employees_fts (rowid, full_name, email, employee_code)
+    VALUES (new.id, new.full_name, new.email, new.employee_code);
+  END;
+  CREATE TRIGGER employees_fts_update AFTER UPDATE OF full_name, email, employee_code ON employees BEGIN
+    INSERT INTO employees_fts (employees_fts, rowid, full_name, email, employee_code)
+    VALUES ('delete', old.id, old.full_name, old.email, old.employee_code);
+    INSERT INTO employees_fts (rowid, full_name, email, employee_code)
+    VALUES (new.id, new.full_name, new.email, new.employee_code);
+  END;
   `,
 ];
 

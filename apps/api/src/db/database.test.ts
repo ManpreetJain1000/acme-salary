@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { MIGRATIONS, migrate, openDatabase, schemaVersion } from './database.js';
+import { MIGRATIONS, migrate, openDatabase, SALARY_USD_SQL, schemaVersion } from './database.js';
 
 describe('migrations', () => {
   it('brings a new database to the latest version', () => {
@@ -67,5 +67,17 @@ describe('audit trail is enforced by the database (migration 3)', () => {
     const db = withEmployee();
     expect(() => db.exec('DELETE FROM employees')).toThrow(/terminated, not deleted/);
     expect(db.prepare('SELECT COUNT(*) AS n FROM salary_history').get()).toEqual({ n: 1 });
+  });
+});
+
+describe('salary-sort index stays in step with the FX rates', () => {
+  it('was built on the same expression the repository sorts by', () => {
+    // If this fails, FX rates changed: add a migration that drops and recreates
+    // idx_employees_status_salary_usd. Sorting stays correct meanwhile, just unindexed.
+    const db = openDatabase(':memory:');
+    const { sql } = db
+      .prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_employees_status_salary_usd'")
+      .get() as { sql: string };
+    expect(sql).toContain(SALARY_USD_SQL);
   });
 });

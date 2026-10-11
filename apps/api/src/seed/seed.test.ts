@@ -80,6 +80,27 @@ describe('seedDatabase', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM employees').get()).toEqual({ n: 20 });
   });
 
+  it('keeps search working for seeded and later-added employees', () => {
+    const db = openDatabase(':memory:');
+    seedDatabase(db, { count: 200 });
+    const triggers = db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'employees_fts_insert'").all();
+    expect(triggers).toHaveLength(1); // restored after the bulk load
+    const someone = db.prepare('SELECT full_name FROM employees WHERE id = 50').get() as { full_name: string };
+    const hits = db
+      .prepare('SELECT rowid FROM employees_fts WHERE employees_fts MATCH ?')
+      .all(`"${someone.full_name}"`) as { rowid: number }[];
+    expect(hits.map((h) => h.rowid)).toContain(50);
+  });
+
+  it('restores the search trigger when the seed fails', () => {
+    const db = openDatabase(':memory:');
+    db.exec(`CREATE TRIGGER fail_midway BEFORE INSERT ON employees WHEN NEW.id = 25
+             BEGIN SELECT RAISE(ABORT, 'boom'); END;`);
+    expect(() => seedDatabase(db, { count: 50 })).toThrow(/boom/);
+    const triggers = db.prepare("SELECT name FROM sqlite_master WHERE name = 'employees_fts_insert'").all();
+    expect(triggers).toHaveLength(1);
+  });
+
   it('is atomic: a failure mid-seed leaves the database empty', () => {
     const db = openDatabase(':memory:');
     // Force a failure on the 25th insert to prove the transaction rolls everything back.

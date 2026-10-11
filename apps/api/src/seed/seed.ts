@@ -49,6 +49,15 @@ export function seedDatabase(
     const { n } = db.prepare('SELECT COUNT(*) AS n FROM employees').get() as { n: number };
     if (n > 0) return { status: 'skipped', employees: n, historyRows: 0 };
 
+    // Bulk load: indexing search one row at a time made 100k rows take ~60 s.
+    // Set the per-row search trigger aside, load, rebuild the index in one pass,
+    // then restore the trigger exactly as the schema defines it. DDL is
+    // transactional in SQLite, so a failure anywhere restores the trigger too.
+    const { sql: ftsTrigger } = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'employees_fts_insert'")
+      .get() as { sql: string };
+    db.exec('DROP TRIGGER employees_fts_insert');
+
     let historyRows = 0;
     for (const { employee, history } of generateEmployees(options)) {
       insertEmployee.run(employee);
@@ -57,9 +66,18 @@ export function seedDatabase(
         historyRows++;
       }
     }
+
+    db.exec("INSERT INTO employees_fts (employees_fts) VALUES ('rebuild')");
+    db.exec(ftsTrigger);
     return { status: 'seeded', employees: options.count, historyRows };
   });
 
   const result = run.immediate();
+  // Bulk load changes the data's shape completely: refresh planner statistics,
+  // in full (a sampled ANALYZE misled the planner; the full one takes ~150 ms at 100k).
+  if (result.status === 'seeded') {
+    db.pragma('analysis_limit = 0');
+    db.exec('ANALYZE');
+  }
   return { ...result, durationMs: Math.round(performance.now() - started) };
 }

@@ -1,5 +1,4 @@
-import type { DB } from '../db/database.js';
-import { CURRENCIES } from '../domain/reference.js';
+import { SALARY_USD_SQL, type DB } from '../db/database.js';
 import type { ListQuery, SortField } from './schemas.js';
 
 /** Row shape as stored. Only this module knows column names. */
@@ -52,15 +51,6 @@ export interface EmployeeFilter {
   jobTitle?: string;
 }
 
-/**
- * USD-equivalent salary as a SQL expression, built only from the static FX table
- * (trusted constants, never user input). Sorting by raw salary_minor would rank
- * INR 2,000,000 (~$22.6k) above USD 150,000, which is meaningless across currencies.
- */
-export const SALARY_USD_SQL = `(salary_minor * CASE currency ${CURRENCIES.map(
-  (c) => `WHEN '${c.code}' THEN ${c.usdRate}`,
-).join(' ')} END)`;
-
 /** Sort key (validated by schemas.ts) -> SQL. User input never reaches ORDER BY. */
 const SORT_SQL: Record<SortField, string> = {
   fullName: 'full_name',
@@ -87,9 +77,17 @@ function filterSql(filter: EmployeeFilter, where: string[], params: Record<strin
   }
 }
 
+/** Trigram indexes need at least 3 characters; shorter terms fall back to LIKE. */
+export const MIN_INDEXED_SEARCH = 3;
+
 /** Escape LIKE wildcards so a search for "50%" is literal. */
 export function escapeLike(term: string): string {
   return term.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/** Quote a term as one FTS5 phrase so operators (AND, *, ") are taken literally. */
+export function ftsPhrase(term: string): string {
+  return `"${term.replaceAll('"', '""')}"`;
 }
 
 export function formatEmployeeCode(n: number): string {
@@ -199,7 +197,10 @@ export class EmployeeRepository {
     const where: string[] = [];
     const params: Record<string, unknown> = {};
 
-    if (query.search) {
+    if (query.search && [...query.search].length >= MIN_INDEXED_SEARCH) {
+      where.push('id IN (SELECT rowid FROM employees_fts WHERE employees_fts MATCH @search)');
+      params.search = ftsPhrase(query.search);
+    } else if (query.search) {
       where.push(
         `(full_name LIKE @search ESCAPE '\\' OR email LIKE @search ESCAPE '\\' OR employee_code LIKE @search ESCAPE '\\')`,
       );
@@ -223,7 +224,7 @@ export class EmployeeRepository {
     const rows = this.db
       .prepare(
         `SELECT * FROM employees ${whereSql}
-         ORDER BY ${column} ${direction}, id ASC
+         ORDER BY ${column} ${direction}, id ${direction}
          LIMIT @limit OFFSET @offset`,
       )
       .all({
