@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DB } from '../db/database.js';
 import { EmployeeRepository } from '../employees/repository.js';
 import { EmployeeService } from '../employees/service.js';
@@ -97,6 +97,57 @@ describe('InsightService money rounding', () => {
     // Exact median 1.5p x 1.33 = 1.995 -> 2 cents. Rounding the median to 2p first gives 2.66 -> 3.
     const [band] = new InsightService(new EmployeeRepository(db)).payBands({});
     expect(band!.medianUsdMinor).toBe(2);
+  });
+});
+
+describe('InsightService cache', () => {
+  function setup() {
+    const { db } = setupTestApp();
+    seedFixture(db);
+    const repo = new EmployeeRepository(db);
+    const readRows = vi.spyOn(repo, 'salaryRows');
+    return { db, repo, readRows, insights: new InsightService(repo), employees: new EmployeeService(repo) };
+  }
+
+  it('serves a repeated query from cache without re-reading rows', () => {
+    const { insights, readRows } = setup();
+    const first = insights.summary({ country: 'US' });
+    expect(insights.summary({ country: 'US' })).toBe(first);
+    expect(readRows).toHaveBeenCalledTimes(1);
+  });
+
+  it('keys by the whole query, so different filters do not collide', () => {
+    const { insights, readRows } = setup();
+    insights.summary({ country: 'US' });
+    insights.summary({ country: 'IN' });
+    insights.outliers({ threshold: 0.5, minGroupSize: 5, limit: 100 });
+    insights.outliers({ threshold: 0.25, minGroupSize: 5, limit: 100 });
+    expect(readRows).toHaveBeenCalledTimes(4);
+  });
+
+  it('recomputes after an employee changes through the app', () => {
+    const { insights, employees, readRows } = setup();
+    const before = insights.summary({}).totalPayrollUsdMinor;
+    employees.create(employeeInput({ country: 'US', currency: 'USD', salaryMinor: 1_000_00 }));
+    expect(insights.summary({}).totalPayrollUsdMinor).toBe(before + 1_000_00);
+    expect(readRows).toHaveBeenCalledTimes(2);
+  });
+
+  it('recomputes after a write from another connection (e.g. the seed CLI)', () => {
+    const { db, insights } = setup();
+    const before = insights.summary({}).totalPayrollUsdMinor;
+    db.exec("UPDATE employees SET salary_minor = salary_minor + 100 WHERE currency = 'USD' AND id = 1");
+    expect(insights.summary({}).totalPayrollUsdMinor).toBe(before + 100);
+  });
+
+  it('evicts the oldest entry when full', () => {
+    const { repo, readRows } = setup();
+    const small = new InsightService(repo, 2);
+    small.summary({ country: 'US' });
+    small.summary({ country: 'IN' });
+    small.summary({ country: 'GB' }); // evicts US
+    small.summary({ country: 'US' });
+    expect(readRows).toHaveBeenCalledTimes(4);
   });
 });
 

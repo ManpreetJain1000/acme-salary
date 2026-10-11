@@ -103,6 +103,13 @@ export function formatEmployeeCode(n: number): string {
 export class EmployeeRepository {
   constructor(private readonly db: DB) {}
 
+  /** Changes whenever any employee row is written, by any connection (migration 5). */
+  dataVersion(): number {
+    return (
+      this.db.prepare("SELECT value FROM app_meta WHERE key = 'data_version'").get() as { value: number }
+    ).value;
+  }
+
   /** Run fn atomically, taking the write lock up front (BEGIN IMMEDIATE). */
   transaction<T>(fn: () => T): T {
     return this.db.transaction(fn).immediate();

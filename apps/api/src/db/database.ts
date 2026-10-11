@@ -89,10 +89,44 @@ export const MIGRATIONS: readonly string[] = [
   DROP INDEX idx_employees_status;
   CREATE INDEX idx_employees_status_name ON employees(status, full_name);
   `,
+
+  // 5: a data version bumped by every employee write, from any connection or process.
+  // Read-heavy views (insights) cache their results against it.
+  `
+  CREATE TABLE app_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+  INSERT INTO app_meta (key, value) VALUES ('data_version', 0);
+  CREATE TRIGGER employees_bump_version_insert AFTER INSERT ON employees
+  BEGIN UPDATE app_meta SET value = value + 1 WHERE key = 'data_version'; END;
+  CREATE TRIGGER employees_bump_version_update AFTER UPDATE ON employees
+  BEGIN UPDATE app_meta SET value = value + 1 WHERE key = 'data_version'; END;
+  `,
 ];
 
 export function schemaVersion(db: DB): number {
   return db.pragma('user_version', { simple: true }) as number;
+}
+
+/**
+ * Drop every application table (and with them their indexes and triggers) so the
+ * schema can be rebuilt from migration 1. Used only by `seed --reset`: history is
+ * append-only, so rows can't be deleted. DROP TABLE doesn't fire DELETE triggers.
+ */
+export function dropAllTables(db: DB): void {
+  const tables = db
+    .prepare(
+      `SELECT name, sql FROM sqlite_master
+       WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+       ORDER BY rowid DESC`,
+    )
+    .all() as { name: string; sql: string }[];
+  // Reverse creation order drops children (salary_history) before the parents they
+  // reference; otherwise the implicit cascade would hit the append-only trigger.
+  // Virtual tables go first: dropping one also drops its shadow tables.
+  const ordered = [...tables].sort(
+    (a, b) => Number(/VIRTUAL/i.test(b.sql)) - Number(/VIRTUAL/i.test(a.sql)),
+  );
+  for (const { name } of ordered) db.exec(`DROP TABLE IF EXISTS "${name.replaceAll('"', '""')}"`);
+  db.exec("DELETE FROM sqlite_sequence; PRAGMA user_version = 0;");
 }
 
 /** Apply every migration newer than the file's user_version, each atomically. */

@@ -44,6 +44,10 @@ export interface Outlier {
   deviation: number;
 }
 
+/** Same query, same key, whatever order its properties arrived in. */
+const stableKey = (query: object) =>
+  JSON.stringify(Object.entries(query).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)));
+
 const sum = (values: readonly number[]) => values.reduce((a, b) => a + b, 0);
 
 function groupBy<T>(items: readonly T[], keyOf: (item: T) => string): Map<string, T[]> {
@@ -66,9 +70,48 @@ const payGroupKey = (r: SalaryRow) => `${r.country}|${r.job_title}|${r.currency}
  * (decisions.md D6). Reads only the narrow columns needed: ~10k small rows.
  */
 export class InsightService {
-  constructor(private readonly repo: EmployeeRepository) {}
+  /** Results for the current data version; cleared as soon as any employee changes. */
+  private cache = new Map<string, unknown>();
+  private cachedVersion = -1;
+
+  constructor(
+    private readonly repo: EmployeeRepository,
+    private readonly maxCacheEntries = 500,
+  ) {}
+
+  /**
+   * Insights read every matching row, but salaries change rarely, so results are
+   * reused until the data version moves. Cached values are shared: never mutate them.
+   */
+  private memo<T>(method: string, query: object, compute: () => T): T {
+    const version = this.repo.dataVersion();
+    if (version !== this.cachedVersion) {
+      this.cache.clear();
+      this.cachedVersion = version;
+    }
+    const key = `${method}:${stableKey(query)}`;
+    if (this.cache.has(key)) return this.cache.get(key) as T;
+    const result = compute();
+    if (this.cache.size >= this.maxCacheEntries) {
+      this.cache.delete(this.cache.keys().next().value!); // drop the oldest entry
+    }
+    this.cache.set(key, result);
+    return result;
+  }
 
   summary(filter: InsightFilter): Summary {
+    return this.memo('summary', filter, () => this.computeSummary(filter));
+  }
+
+  payBands(filter: InsightFilter): PayBand[] {
+    return this.memo('payBands', filter, () => this.computePayBands(filter));
+  }
+
+  outliers(query: OutlierQuery): { total: number; data: Outlier[] } {
+    return this.memo('outliers', query, () => this.computeOutliers(query));
+  }
+
+  private computeSummary(filter: InsightFilter): Summary {
     const rows = this.rows(filter);
     // Exact USD per row; every aggregate is rounded once, at the end.
     const usd = rows.map((r) => toUsdExact(r.salary_minor, r.currency));
@@ -104,7 +147,7 @@ export class InsightService {
     };
   }
 
-  payBands(filter: InsightFilter): PayBand[] {
+  private computePayBands(filter: InsightFilter): PayBand[] {
     const groups = groupBy(this.rows(filter), payGroupKey);
     const bands: PayBand[] = [];
     for (const items of groups.values()) {
@@ -127,7 +170,7 @@ export class InsightService {
     );
   }
 
-  outliers(query: OutlierQuery): { total: number; data: Outlier[] } {
+  private computeOutliers(query: OutlierQuery): { total: number; data: Outlier[] } {
     const groups = groupBy(this.rows(query), payGroupKey);
     const found: Outlier[] = [];
     for (const items of groups.values()) {
