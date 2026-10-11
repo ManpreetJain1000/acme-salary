@@ -1,5 +1,7 @@
 # ACME Salary Manager
 
+[![CI](https://github.com/ManpreetJain1000/acme-salary/actions/workflows/ci.yml/badge.svg)](https://github.com/ManpreetJain1000/acme-salary/actions/workflows/ci.yml)
+
 Web software for ACME's HR manager to **maintain salary data for 10,000 employees across 10 countries** and **answer questions about how the organisation pays people**, replacing a spreadsheet workflow.
 
 **Live demo:** _add your deployed URL here_ · **Video walkthrough:** _add link_
