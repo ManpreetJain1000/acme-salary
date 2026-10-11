@@ -3,6 +3,7 @@
  * Usage: npm run bench --workspace api. Numbers are recorded in docs/performance.md.
  */
 import { openDatabase } from './db/database.js';
+import { EmployeeRepository } from './employees/repository.js';
 import { listQuerySchema } from './employees/schemas.js';
 import { EmployeeService } from './employees/service.js';
 import { InsightService } from './insights/service.js';
@@ -10,8 +11,9 @@ import { seedDatabase } from './seed/seed.js';
 
 const db = openDatabase(':memory:');
 const seed = seedDatabase(db);
-const employees = new EmployeeService(db);
-const insights = new InsightService(db);
+const repo = new EmployeeRepository(db);
+const employees = new EmployeeService(repo);
+const insights = new InsightService(repo);
 
 function bench(name: string, fn: () => unknown, runs = 50) {
   for (let i = 0; i < 5; i++) fn(); // warm prepared-statement cache

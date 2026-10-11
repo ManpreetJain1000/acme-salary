@@ -1,4 +1,3 @@
-import type { DB } from '../db/database.js';
 import { toUsdMinor } from '../domain/money.js';
 import { conflict, notFound } from '../http/errors.js';
 import {
@@ -76,14 +75,10 @@ function toSalaryChange(row: SalaryHistoryRow): SalaryChange {
  * audit row in the same transaction, so history can never drift from reality.
  */
 export class EmployeeService {
-  private readonly repo: EmployeeRepository;
-
   constructor(
-    private readonly db: DB,
+    private readonly repo: EmployeeRepository,
     private readonly now: Clock = systemClock,
-  ) {
-    this.repo = new EmployeeRepository(db);
-  }
+  ) {}
 
   list(query: ListQuery): Page<Employee> {
     const { rows, total } = this.repo.list(query);
@@ -103,7 +98,7 @@ export class EmployeeService {
   }
 
   create(input: EmployeeInput): Employee {
-    return this.db.transaction(() => {
+    return this.repo.transaction(() => {
       this.assertEmailAvailable(input.email);
       const ts = this.now();
       const id = this.repo.insert({
@@ -128,11 +123,11 @@ export class EmployeeService {
         changed_at: ts,
       });
       return toEmployee(this.repo.findById(id)!);
-    }).immediate();
+    });
   }
 
   update(id: number, patch: EmployeeUpdate): Employee {
-    return this.db.transaction(() => {
+    return this.repo.transaction(() => {
       const current = this.repo.findById(id);
       if (!current) throw notFound('Employee');
       if (patch.email && patch.email !== current.email) this.assertEmailAvailable(patch.email, id);
@@ -164,7 +159,7 @@ export class EmployeeService {
         });
       }
       return toEmployee(this.repo.findById(id)!);
-    }).immediate();
+    });
   }
 
   delete(id: number): void {

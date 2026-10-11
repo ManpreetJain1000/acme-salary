@@ -1,19 +1,8 @@
-import type { DB } from '../db/database.js';
 import { toUsdMinor } from '../domain/money.js';
 import { countryByCode } from '../domain/reference.js';
 import { describe, relativeDeviation, type Distribution } from '../domain/stats.js';
+import type { EmployeeRepository, SalaryRow } from '../employees/repository.js';
 import type { InsightFilter, OutlierQuery } from './schemas.js';
-
-interface SalaryRow {
-  id: number;
-  employee_code: string;
-  full_name: string;
-  job_title: string;
-  department: string;
-  country: string;
-  currency: string;
-  salary_minor: number;
-}
 
 export interface Breakdown {
   key: string;
@@ -70,12 +59,12 @@ function groupBy<T>(items: readonly T[], keyOf: (item: T) => string): Map<string
 const payGroupKey = (r: SalaryRow) => `${r.country}|${r.job_title}|${r.currency}`;
 
 /**
- * Answers "how does the org pay people?". Filtering happens in SQL (indexed);
+ * Answers "how does the org pay people?". Filtering happens in SQL (repository, indexed);
  * percentiles are computed in pure functions because SQLite has no MEDIAN
  * (decisions.md D6). Reads only the narrow columns needed: ~10k small rows.
  */
 export class InsightService {
-  constructor(private readonly db: DB) {}
+  constructor(private readonly repo: EmployeeRepository) {}
 
   summary(filter: InsightFilter): Summary {
     const rows = this.rows(filter);
@@ -163,26 +152,6 @@ export class InsightService {
   }
 
   private rows(filter: InsightFilter): SalaryRow[] {
-    const where: string[] = [];
-    const params: Record<string, string> = {};
-    if (filter.country) {
-      where.push('country = @country');
-      params.country = filter.country;
-    }
-    if (filter.department) {
-      where.push('department = @department');
-      params.department = filter.department;
-    }
-    if (filter.jobTitle) {
-      where.push('job_title = @jobTitle');
-      params.jobTitle = filter.jobTitle;
-    }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    return this.db
-      .prepare(
-        `SELECT id, employee_code, full_name, job_title, department, country, currency, salary_minor
-         FROM employees ${whereSql}`,
-      )
-      .all(params) as SalaryRow[];
+    return this.repo.salaryRows(filter);
   }
 }

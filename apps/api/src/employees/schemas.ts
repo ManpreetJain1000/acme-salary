@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import {
   COUNTRY_CODES,
-  CURRENCIES,
   CURRENCY_CODES,
   DEPARTMENT_NAMES,
   JOB_TITLES,
@@ -33,25 +32,17 @@ export const employeeUpdateSchema = employeeInputSchema
 export type EmployeeInput = z.infer<typeof employeeInputSchema>;
 export type EmployeeUpdate = z.infer<typeof employeeUpdateSchema>;
 
-/**
- * USD-equivalent salary as a SQL expression, built only from the static FX table
- * (trusted constants, never user input). Sorting by raw salary_minor would rank
- * INR 2,000,000 (~$22.6k) above USD 150,000, which is meaningless across currencies.
- */
-export const SALARY_USD_SQL = `(salary_minor * CASE currency ${CURRENCIES.map(
-  (c) => `WHEN '${c.code}' THEN ${c.usdRate}`,
-).join(' ')} END)`;
-
-/** Allow-list of sortable columns: user input is never interpolated into SQL. */
-export const SORT_FIELDS = {
-  fullName: 'full_name',
-  employeeCode: 'employee_code',
-  jobTitle: 'job_title',
-  department: 'department',
-  country: 'country',
-  salary: SALARY_USD_SQL,
-  hireDate: 'hire_date',
-} as const;
+/** Allow-list of sortable fields; the repository maps each to SQL. */
+export const SORT_FIELD_NAMES = [
+  'fullName',
+  'employeeCode',
+  'jobTitle',
+  'department',
+  'country',
+  'salary',
+  'hireDate',
+] as const;
+export type SortField = (typeof SORT_FIELD_NAMES)[number];
 
 export const MAX_PAGE_SIZE = 100;
 
@@ -62,7 +53,7 @@ export const listQuerySchema = z.object({
   country: z.enum(COUNTRY_CODES).optional(),
   department: z.enum(DEPARTMENT_NAMES).optional(),
   jobTitle: z.enum(JOB_TITLES).optional(),
-  sortBy: z.enum(Object.keys(SORT_FIELDS) as [keyof typeof SORT_FIELDS]).default('fullName'),
+  sortBy: z.enum(SORT_FIELD_NAMES).default('fullName'),
   sortDir: z.enum(['asc', 'desc']).default('asc'),
 });
 

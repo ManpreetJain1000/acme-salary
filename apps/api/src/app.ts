@@ -8,6 +8,7 @@ import {
   DEPARTMENTS,
   FX_AS_OF,
 } from './domain/reference.js';
+import { EmployeeRepository } from './employees/repository.js';
 import { employeeRoutes } from './employees/routes.js';
 import { EmployeeService, type Clock } from './employees/service.js';
 import { errorHandler, notFoundHandler } from './http/errors.js';
@@ -46,8 +47,9 @@ export function createApp({ db, corsOrigin, now }: AppOptions): Express {
     });
   });
 
-  app.use('/api/employees', employeeRoutes(new EmployeeService(db, now)));
-  app.use('/api/insights', insightRoutes(new InsightService(db)));
+  const employees = new EmployeeRepository(db);
+  app.use('/api/employees', employeeRoutes(new EmployeeService(employees, now)));
+  app.use('/api/insights', insightRoutes(new InsightService(employees)));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

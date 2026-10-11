@@ -1,13 +1,14 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { DB } from '../db/database.js';
+import { EmployeeRepository } from '../employees/repository.js';
 import { EmployeeService } from '../employees/service.js';
 import { employeeInput, setupTestApp } from '../test-utils.js';
 import { InsightService } from './service.js';
 
 /** Five US Software Engineers at 100k..140k (+ one outlier) and two Indian engineers. */
 function seedFixture(db: DB) {
-  const employees = new EmployeeService(db, () => '2026-10-01T00:00:00.000Z');
+  const employees = new EmployeeService(new EmployeeRepository(db), () => '2026-10-01T00:00:00.000Z');
   const us = (usd: number, fullName = 'US Engineer') =>
     employees.create(employeeInput({ fullName, country: 'US', currency: 'USD', salaryMinor: usd * 100 }));
   [100_000, 110_000, 120_000, 130_000, 140_000].forEach((v) => us(v));
@@ -24,7 +25,7 @@ describe('InsightService', () => {
   beforeEach(() => {
     const { db } = setupTestApp();
     seedFixture(db);
-    service = new InsightService(db);
+    service = new InsightService(new EmployeeRepository(db));
   });
 
   it('summarises headcount and USD-normalised payroll by country, largest first', () => {

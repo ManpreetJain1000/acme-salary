@@ -1,5 +1,6 @@
 import type { DB } from '../db/database.js';
-import { SORT_FIELDS, type ListQuery } from './schemas.js';
+import { CURRENCIES } from '../domain/reference.js';
+import type { ListQuery, SortField } from './schemas.js';
 
 /** Row shape as stored. Only this module knows column names. */
 export interface EmployeeRow {
@@ -29,6 +30,59 @@ export interface SalaryHistoryRow {
 
 export type NewEmployeeRow = Omit<EmployeeRow, 'id'>;
 
+/** Narrow row for statistics: only what pay groups and outliers need. */
+export interface SalaryRow {
+  id: number;
+  employee_code: string;
+  full_name: string;
+  job_title: string;
+  department: string;
+  country: string;
+  currency: string;
+  salary_minor: number;
+}
+
+export interface EmployeeFilter {
+  country?: string;
+  department?: string;
+  jobTitle?: string;
+}
+
+/**
+ * USD-equivalent salary as a SQL expression, built only from the static FX table
+ * (trusted constants, never user input). Sorting by raw salary_minor would rank
+ * INR 2,000,000 (~$22.6k) above USD 150,000, which is meaningless across currencies.
+ */
+export const SALARY_USD_SQL = `(salary_minor * CASE currency ${CURRENCIES.map(
+  (c) => `WHEN '${c.code}' THEN ${c.usdRate}`,
+).join(' ')} END)`;
+
+/** Sort key (validated by schemas.ts) -> SQL. User input never reaches ORDER BY. */
+const SORT_SQL: Record<SortField, string> = {
+  fullName: 'full_name',
+  employeeCode: 'employee_code',
+  jobTitle: 'job_title',
+  department: 'department',
+  country: 'country',
+  salary: SALARY_USD_SQL,
+  hireDate: 'hire_date',
+};
+
+function filterSql(filter: EmployeeFilter, where: string[], params: Record<string, unknown>) {
+  if (filter.country) {
+    where.push('country = @country');
+    params.country = filter.country;
+  }
+  if (filter.department) {
+    where.push('department = @department');
+    params.department = filter.department;
+  }
+  if (filter.jobTitle) {
+    where.push('job_title = @jobTitle');
+    params.jobTitle = filter.jobTitle;
+  }
+}
+
 /** Escape LIKE wildcards so a search for "50%" is literal. */
 export function escapeLike(term: string): string {
   return term.replace(/[\\%_]/g, (ch) => `\\${ch}`);
@@ -38,8 +92,17 @@ export function formatEmployeeCode(n: number): string {
   return `EMP-${String(n).padStart(6, '0')}`;
 }
 
+/**
+ * The only module that knows SQL or the database library (decisions.md D2).
+ * Services express *what* must be atomic via transaction(); this decides *how*.
+ */
 export class EmployeeRepository {
   constructor(private readonly db: DB) {}
+
+  /** Run fn atomically, taking the write lock up front (BEGIN IMMEDIATE). */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn).immediate();
+  }
 
   findById(id: number): EmployeeRow | undefined {
     return this.db.prepare('SELECT * FROM employees WHERE id = ?').get(id) as
@@ -124,22 +187,11 @@ export class EmployeeRepository {
       );
       params.search = `%${escapeLike(query.search)}%`;
     }
-    if (query.country) {
-      where.push('country = @country');
-      params.country = query.country;
-    }
-    if (query.department) {
-      where.push('department = @department');
-      params.department = query.department;
-    }
-    if (query.jobTitle) {
-      where.push('job_title = @jobTitle');
-      params.jobTitle = query.jobTitle;
-    }
+    filterSql(query, where, params);
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    // Both values come from allow-lists (schemas.ts), never from raw input.
-    const column = SORT_FIELDS[query.sortBy];
+    // Both values come from allow-lists, never from raw input.
+    const column = SORT_SQL[query.sortBy];
     const direction = query.sortDir === 'desc' ? 'DESC' : 'ASC';
 
     const { total } = this.db
@@ -159,5 +211,18 @@ export class EmployeeRepository {
       }) as EmployeeRow[];
 
     return { rows, total };
+  }
+
+  salaryRows(filter: EmployeeFilter): SalaryRow[] {
+    const where: string[] = [];
+    const params: Record<string, unknown> = {};
+    filterSql(filter, where, params);
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return this.db
+      .prepare(
+        `SELECT id, employee_code, full_name, job_title, department, country, currency, salary_minor
+         FROM employees ${whereSql}`,
+      )
+      .all(params) as SalaryRow[];
   }
 }
