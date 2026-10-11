@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   COUNTRY_CODES,
+  CURRENCIES,
   CURRENCY_CODES,
   DEPARTMENT_NAMES,
   JOB_TITLES,
@@ -32,6 +33,15 @@ export const employeeUpdateSchema = employeeInputSchema
 export type EmployeeInput = z.infer<typeof employeeInputSchema>;
 export type EmployeeUpdate = z.infer<typeof employeeUpdateSchema>;
 
+/**
+ * USD-equivalent salary as a SQL expression, built only from the static FX table
+ * (trusted constants, never user input). Sorting by raw salary_minor would rank
+ * INR 2,000,000 (~$22.6k) above USD 150,000, which is meaningless across currencies.
+ */
+export const SALARY_USD_SQL = `(salary_minor * CASE currency ${CURRENCIES.map(
+  (c) => `WHEN '${c.code}' THEN ${c.usdRate}`,
+).join(' ')} END)`;
+
 /** Allow-list of sortable columns: user input is never interpolated into SQL. */
 export const SORT_FIELDS = {
   fullName: 'full_name',
@@ -39,7 +49,7 @@ export const SORT_FIELDS = {
   jobTitle: 'job_title',
   department: 'department',
   country: 'country',
-  salary: 'salary_minor',
+  salary: SALARY_USD_SQL,
   hireDate: 'hire_date',
 } as const;
 

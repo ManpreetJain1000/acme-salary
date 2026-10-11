@@ -165,8 +165,8 @@ export default function EmployeesPage() {
                 <SortHeader label="Job title" field="jobTitle" sort={sort} onSort={onSort} />
                 <SortHeader label="Department" field="department" sort={sort} onSort={onSort} />
                 <SortHeader label="Country" field="country" sort={sort} onSort={onSort} />
-                <SortHeader label="Salary (local)" field="salary" sort={sort} onSort={onSort} align="right" />
-                <Table.Th style={{ textAlign: 'right' }}>≈ USD</Table.Th>
+                <SortHeader label="Salary" field="salary" sort={sort} onSort={onSort} align="right" />
+                <Table.Th style={{ textAlign: 'right' }} title="Salary sorting uses this USD equivalent">≈ USD</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>

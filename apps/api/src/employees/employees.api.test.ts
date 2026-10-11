@@ -131,9 +131,14 @@ describe('Employees API', () => {
       expect(none.body.total).toBe(0);
     });
 
-    it('sorts by an allow-listed field', async () => {
+    it('sorts salary by USD equivalent, not by raw local amount', async () => {
+      // Asha: 2,000,000 INR (~$22.6k) has the largest raw number but is the lowest paid.
       const res = await request(app).get('/api/employees?sortBy=salary&sortDir=desc').expect(200);
-      expect(res.body.data[0].fullName).toBe('Asha Rao'); // largest number in minor units (INR)
+      expect(res.body.data.map((e: { fullName: string }) => e.fullName)).toEqual([
+        'Ben Carter', // $90,000
+        'Chloe 100% Martin', // EUR 60,000 (~$69.6k)
+        'Asha Rao',
+      ]);
     });
 
     it('rejects non-allow-listed sort fields and oversize pages', async () => {
