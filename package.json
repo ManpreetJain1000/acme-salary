@@ -1,0 +1,12 @@
+{
+  "name": "acme-salary",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace api & npm run dev --workspace web",
+    "test": "npm test --workspace api",
+    "seed": "npm run seed --workspace api",
+    "build": "npm run build --workspace api && npm run build --workspace web"
+  },
+  "engines": { "node": ">=20" }
+}
