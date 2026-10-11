@@ -20,13 +20,14 @@ Replace the Excel workflow ACME's HR team uses to manage salary data for ~10,000
 - **Multi-currency salaries** — stored in the employee's local currency as integer minor units; USD-normalised at read time using a dated, static FX table so countries are comparable.
 - **Salary history** — every salary change writes an immutable history row.
 - **Insights dashboard** — answers Q2–Q4.
+- **HR sign-in**: every API route requires a signed-in HR user (added after review: salary data must never be open to anyone with the link).
 - **Seed script** — deterministic generation of 10,000 realistic employees.
 - **Tests** — unit tests for core logic (stats, money/FX, validation, seed) + API integration tests.
 
 ## Deliberately out of scope (and why)
 | Left out | Reasoning |
 |---|---|
-| Authentication / roles | Single persona, demo data. **First production gap** — plan: SSO + HR role, salary fields gated by role, access audit log. |
+| Multi-user accounts, SSO, roles | One persona: a single HR sign-in (hashed password, signed session) covers it. SSO + per-user roles + access audit log is the next step. |
 | Payroll processing, tax, payslips, bonuses, equity | A different product. The problem is *managing and understanding* pay, not paying people. |
 | Live FX rates | Static dated rates keep numbers deterministic and testable; the rate date is shown in the UI. |
 | Excel import / export | Highest-value next feature for this persona; cut for time, not value. |

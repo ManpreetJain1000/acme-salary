@@ -8,3 +8,13 @@ services:
     envVars:
       - key: SEED_ON_BOOT
         value: "true"
+      # Public demo with synthetic data: a known password, shown on the login page.
+      # For real data, set your own HR_PASSWORD in the dashboard and DEMO_LOGIN_HINT=false.
+      - key: HR_EMAIL
+        value: hr@acme.example
+      - key: HR_PASSWORD
+        value: acme-demo-2026
+      - key: DEMO_LOGIN_HINT
+        value: "true"
+      - key: SESSION_SECRET
+        generateValue: true

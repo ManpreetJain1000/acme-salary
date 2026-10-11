@@ -6,7 +6,8 @@ Tell it as the HR manager's day, not as a feature tour.
 "ACME's HR team manages pay for 10,000 people in 10 countries in Excel. I built a tool so the HR manager can maintain salaries and answer questions about how we pay people." Show the README and `docs/requirements.md`, and point at the five questions table.
 
 **0:20 · Find and update someone (60 s)** (Q1, Q5)
-- Employees page: "10,000 total". Search `sharma`; results filter as you type.
+- Open the app: it redirects to sign-in. Use the demo sign-in, and point out that every API route needs a session.
+- Employees page: "10,000 current employees". Search `sharma`, then `muller` (it finds "Müller": accent-insensitive full-text search).
 - Filter Country = India, Department = Engineering. Sort by Salary and mention it sorts by USD equivalent across currencies.
 - Open an employee. Show local salary, the ≈ USD value and the salary history timeline.
 - Edit: give a 10% raise and save. The timeline shows a new "Raise +10%" entry, written in the same transaction as the update.
