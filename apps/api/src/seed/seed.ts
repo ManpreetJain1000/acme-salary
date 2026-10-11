@@ -1,4 +1,4 @@
-import type { DB } from '../db/database.js';
+import { migrate, type DB } from '../db/database.js';
 import { DEFAULT_SEED_OPTIONS, generateEmployees, type SeedOptions } from './generator.js';
 
 export interface SeedResult {
@@ -41,8 +41,12 @@ export function seedDatabase(
 
   const run = db.transaction((): Omit<SeedResult, 'durationMs'> => {
     if (reset) {
-      db.exec(`DELETE FROM salary_history; DELETE FROM employees;
-               DELETE FROM sqlite_sequence WHERE name = 'employees';`);
+      // History is append-only and employees can't be deleted (migration 3), so a
+      // reset rebuilds the schema instead. DROP TABLE does not fire DELETE triggers.
+      db.exec(`DROP TABLE salary_history; DROP TABLE employees;
+               DELETE FROM sqlite_sequence WHERE name = 'employees';
+               PRAGMA user_version = 0;`);
+      migrate(db);
     }
     const { n } = db.prepare('SELECT COUNT(*) AS n FROM employees').get() as { n: number };
     if (n > 0) return { status: 'skipped', employees: n, historyRows: 0 };

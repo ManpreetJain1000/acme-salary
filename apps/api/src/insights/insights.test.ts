@@ -37,6 +37,16 @@ describe('InsightService', () => {
     expect(summary.byCountry[1]!.label).toBe('India');
   });
 
+  it('counts only current employees', () => {
+    const { db } = setupTestApp();
+    const repo = new EmployeeRepository(db);
+    const employees = new EmployeeService(repo);
+    const leaver = employees.create(employeeInput({ country: 'US', currency: 'USD', salaryMinor: 999_999_00 }));
+    employees.create(employeeInput({ country: 'US', currency: 'USD', salaryMinor: 100_000_00 }));
+    employees.terminate(leaver.id, {});
+    expect(new InsightService(repo).summary({})).toMatchObject({ headcount: 1, totalPayrollUsdMinor: 100_000_00 });
+  });
+
   it('respects filters', () => {
     const summary = service.summary({ department: 'Sales' });
     expect(summary.headcount).toBe(1);

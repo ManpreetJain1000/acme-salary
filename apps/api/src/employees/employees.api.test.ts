@@ -92,14 +92,70 @@ describe('Employees API', () => {
     });
   });
 
-  describe('DELETE /api/employees/:id', () => {
-    it('deletes the employee and never reuses its code', async () => {
-      const { body: first } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
-      await request(app).delete(`/api/employees/${first.id}`).expect(204);
-      await request(app).get(`/api/employees/${first.id}`).expect(404);
+  describe('leaving: terminate and reinstate (no hard delete)', () => {
+    it('terminates instead of deleting, keeping the record and its salary history', async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
+      await request(app).patch(`/api/employees/${e.id}`).send({ salaryMinor: 250_000_000 }).expect(200);
 
-      const { body: second } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
-      expect(second.employeeCode).toBe('EMP-000002');
+      const res = await request(app)
+        .post(`/api/employees/${e.id}/terminate`)
+        .send({ terminationDate: '2026-09-30' })
+        .expect(200);
+      expect(res.body).toMatchObject({ status: 'terminated', terminatedAt: '2026-09-30' });
+
+      const { body } = await request(app).get(`/api/employees/${e.id}`).expect(200);
+      expect(body.salaryHistory).toHaveLength(2);
+    });
+
+    it('defaults the termination date to today', async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
+      const res = await request(app).post(`/api/employees/${e.id}/terminate`).expect(200);
+      expect(res.body.terminatedAt).toBe(FIXED_NOW.slice(0, 10));
+    });
+
+    it('rejects DELETE with 405 and points to terminate', async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
+      const res = await request(app).delete(`/api/employees/${e.id}`).expect(405);
+      expect(res.body.error.message).toMatch(/terminate/);
+      await request(app).get(`/api/employees/${e.id}`).expect(200);
+    });
+
+    it('hides former employees from the directory unless asked', async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput({ fullName: 'Gone Person' })).expect(201);
+      await request(app).post('/api/employees').send(employeeInput({ fullName: 'Still Here' })).expect(201);
+      await request(app).post(`/api/employees/${e.id}/terminate`).expect(200);
+
+      const names = async (qs: string) =>
+        (await request(app).get(`/api/employees${qs}`).expect(200)).body.data.map((x: { fullName: string }) => x.fullName);
+      expect(await names('')).toEqual(['Still Here']);
+      expect(await names('?status=terminated')).toEqual(['Gone Person']);
+      expect(await names('?status=all')).toEqual(['Gone Person', 'Still Here']);
+    });
+
+    it('blocks edits to a former employee until reinstated', async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput()).expect(201);
+      await request(app).post(`/api/employees/${e.id}/terminate`).expect(200);
+      await request(app).patch(`/api/employees/${e.id}`).send({ salaryMinor: 1_000 }).expect(409);
+
+      const res = await request(app).post(`/api/employees/${e.id}/reinstate`).expect(200);
+      expect(res.body).toMatchObject({ status: 'active', terminatedAt: null });
+      await request(app).patch(`/api/employees/${e.id}`).send({ salaryMinor: 1_000 }).expect(200);
+    });
+
+    it('rejects double termination, reinstating an active employee and a date before hire', async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput({ hireDate: '2024-04-01' })).expect(201);
+      await request(app).post(`/api/employees/${e.id}/terminate`).send({ terminationDate: '2024-03-31' }).expect(400);
+      await request(app).post(`/api/employees/${e.id}/reinstate`).expect(409);
+      await request(app).post(`/api/employees/${e.id}/terminate`).expect(200);
+      await request(app).post(`/api/employees/${e.id}/terminate`).expect(409);
+      await request(app).post('/api/employees/9999/terminate').expect(404);
+    });
+
+    it("explains when a new hire's email belongs to a former employee", async () => {
+      const { body: e } = await request(app).post('/api/employees').send(employeeInput({ email: 'back@acme.example' })).expect(201);
+      await request(app).post(`/api/employees/${e.id}/terminate`).expect(200);
+      const res = await request(app).post('/api/employees').send(employeeInput({ email: 'back@acme.example' })).expect(409);
+      expect(res.body.error.message).toMatch(/former employee EMP-000001; reinstate/);
     });
   });
 

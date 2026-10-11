@@ -14,9 +14,13 @@ export interface EmployeeRow {
   currency: string;
   salary_minor: number;
   hire_date: string;
+  status: EmployeeStatus;
+  terminated_at: string | null;
   created_at: string;
   updated_at: string;
 }
+
+export type EmployeeStatus = 'active' | 'terminated';
 
 export interface SalaryHistoryRow {
   id: number;
@@ -28,7 +32,7 @@ export interface SalaryHistoryRow {
   changed_at: string;
 }
 
-export type NewEmployeeRow = Omit<EmployeeRow, 'id'>;
+export type NewEmployeeRow = Omit<EmployeeRow, 'id' | 'status' | 'terminated_at'>;
 
 /** Narrow row for statistics: only what pay groups and outliers need. */
 export interface SalaryRow {
@@ -118,7 +122,7 @@ export class EmployeeRepository {
 
   /**
    * Next human-facing code. Reads AUTOINCREMENT's high-water mark rather than
-   * MAX(id), so a deleted employee's code is never handed to someone else.
+   * MAX(id), so a code is never handed to someone else even if rows are ever removed.
    * Must be called inside the write transaction that performs the insert.
    */
   nextEmployeeCode(): string {
@@ -142,7 +146,10 @@ export class EmployeeRepository {
     return Number(result.lastInsertRowid);
   }
 
-  update(id: number, row: Omit<EmployeeRow, 'id' | 'employee_code' | 'created_at'>): void {
+  update(
+    id: number,
+    row: Omit<EmployeeRow, 'id' | 'employee_code' | 'created_at' | 'status' | 'terminated_at'>,
+  ): void {
     this.db
       .prepare(
         `UPDATE employees SET
@@ -154,8 +161,12 @@ export class EmployeeRepository {
       .run({ ...row, id });
   }
 
-  delete(id: number): boolean {
-    return this.db.prepare('DELETE FROM employees WHERE id = ?').run(id).changes > 0;
+  setStatus(id: number, status: EmployeeStatus, terminatedAt: string | null, updatedAt: string): void {
+    this.db
+      .prepare(
+        'UPDATE employees SET status = ?, terminated_at = ?, updated_at = ? WHERE id = ?',
+      )
+      .run(status, terminatedAt, updatedAt, id);
   }
 
   insertSalaryHistory(row: Omit<SalaryHistoryRow, 'id'>): void {
@@ -188,6 +199,10 @@ export class EmployeeRepository {
       params.search = `%${escapeLike(query.search)}%`;
     }
     filterSql(query, where, params);
+    if (query.status !== 'all') {
+      where.push('status = @status');
+      params.status = query.status;
+    }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     // Both values come from allow-lists, never from raw input.
@@ -213,11 +228,12 @@ export class EmployeeRepository {
     return { rows, total };
   }
 
+  /** Current workforce only: former employees don't count towards how we pay people. */
   salaryRows(filter: EmployeeFilter): SalaryRow[] {
-    const where: string[] = [];
+    const where: string[] = ["status = 'active'"];
     const params: Record<string, unknown> = {};
     filterSql(filter, where, params);
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const whereSql = `WHERE ${where.join(' AND ')}`;
     return this.db
       .prepare(
         `SELECT id, employee_code, full_name, job_title, department, country, currency, salary_minor

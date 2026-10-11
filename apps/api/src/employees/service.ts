@@ -1,11 +1,12 @@
 import { toUsdMinor } from '../domain/money.js';
-import { conflict, notFound } from '../http/errors.js';
+import { badRequest, conflict, notFound } from '../http/errors.js';
 import {
   EmployeeRepository,
   type EmployeeRow,
+  type EmployeeStatus,
   type SalaryHistoryRow,
 } from './repository.js';
-import type { EmployeeInput, EmployeeUpdate, ListQuery } from './schemas.js';
+import type { EmployeeInput, EmployeeUpdate, ListQuery, TerminateInput } from './schemas.js';
 
 export interface Employee {
   id: number;
@@ -19,6 +20,8 @@ export interface Employee {
   salaryMinor: number;
   salaryUsdMinor: number;
   hireDate: string;
+  status: EmployeeStatus;
+  terminatedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -55,6 +58,8 @@ export function toEmployee(row: EmployeeRow): Employee {
     salaryMinor: row.salary_minor,
     salaryUsdMinor: toUsdMinor(row.salary_minor, row.currency),
     hireDate: row.hire_date,
+    status: row.status,
+    terminatedAt: row.terminated_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -130,6 +135,9 @@ export class EmployeeService {
     return this.repo.transaction(() => {
       const current = this.repo.findById(id);
       if (!current) throw notFound('Employee');
+      if (current.status === 'terminated') {
+        throw conflict(`${current.full_name} has left; reinstate them before making changes`);
+      }
       if (patch.email && patch.email !== current.email) this.assertEmailAvailable(patch.email, id);
 
       const ts = this.now();
@@ -162,14 +170,44 @@ export class EmployeeService {
     });
   }
 
-  delete(id: number): void {
-    if (!this.repo.delete(id)) throw notFound('Employee');
+  /**
+   * Record that someone left. Their row and salary history are kept: HR is asked
+   * about former employees' pay, and the audit trail must survive (decisions.md D5).
+   */
+  terminate(id: number, input: TerminateInput): Employee {
+    return this.repo.transaction(() => {
+      const current = this.repo.findById(id);
+      if (!current) throw notFound('Employee');
+      if (current.status === 'terminated') throw conflict(`${current.full_name} has already left`);
+      const ts = this.now();
+      const date = input.terminationDate ?? ts.slice(0, 10);
+      if (date < current.hire_date) {
+        throw badRequest(`Termination date ${date} is before the hire date ${current.hire_date}`);
+      }
+      this.repo.setStatus(id, 'terminated', date, ts);
+      return toEmployee(this.repo.findById(id)!);
+    });
+  }
+
+  /** Undo a termination recorded by mistake, or a rehire into the same record. */
+  reinstate(id: number): Employee {
+    return this.repo.transaction(() => {
+      const current = this.repo.findById(id);
+      if (!current) throw notFound('Employee');
+      if (current.status === 'active') throw conflict(`${current.full_name} is already active`);
+      this.repo.setStatus(id, 'active', null, this.now());
+      return toEmployee(this.repo.findById(id)!);
+    });
   }
 
   private assertEmailAvailable(email: string, exceptId?: number): void {
     const existing = this.repo.findByEmail(email);
     if (existing && existing.id !== exceptId) {
-      throw conflict(`An employee with email ${email} already exists`);
+      throw conflict(
+        existing.status === 'terminated'
+          ? `${email} belongs to former employee ${existing.employee_code}; reinstate them instead`
+          : `An employee with email ${email} already exists`,
+      );
     }
   }
 }

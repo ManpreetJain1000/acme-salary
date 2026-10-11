@@ -90,6 +90,8 @@ export function generateEmployees(options: SeedOptions = DEFAULT_SEED_OPTIONS): 
         currency: country.currency,
         salary_minor: salaryMinor,
         hire_date: hireDate,
+        status: 'active',
+        terminated_at: null,
         created_at: createdAt,
         updated_at: createdAt,
       },

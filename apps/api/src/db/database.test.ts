@@ -36,3 +36,36 @@ describe('migrations', () => {
     });
   });
 });
+
+describe('audit trail is enforced by the database (migration 3)', () => {
+  function withEmployee() {
+    const db = openDatabase(':memory:');
+    const { lastInsertRowid } = db
+      .prepare(
+        `INSERT INTO employees (employee_code, full_name, email, job_title, department, country,
+           currency, salary_minor, hire_date, created_at, updated_at)
+         VALUES ('EMP-000001', 'A', 'a@acme.example', 'Recruiter', 'People', 'US', 'USD',
+           100, '2020-01-01', '2020-01-01', '2020-01-01')`,
+      )
+      .run();
+    db.prepare(
+      `INSERT INTO salary_history (employee_id, new_salary_minor, new_currency, changed_at)
+       VALUES (?, 100, 'USD', '2020-01-01')`,
+    ).run(lastInsertRowid);
+    return db;
+  }
+
+  it('rejects editing salary history', () => {
+    expect(() => withEmployee().exec('UPDATE salary_history SET new_salary_minor = 1')).toThrow(/append-only/);
+  });
+
+  it('rejects deleting salary history', () => {
+    expect(() => withEmployee().exec('DELETE FROM salary_history')).toThrow(/append-only/);
+  });
+
+  it('rejects deleting an employee, which would cascade into history', () => {
+    const db = withEmployee();
+    expect(() => db.exec('DELETE FROM employees')).toThrow(/terminated, not deleted/);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM salary_history').get()).toEqual({ n: 1 });
+  });
+});

@@ -55,8 +55,16 @@ export const listQuerySchema = z.object({
   jobTitle: z.enum(JOB_TITLES).optional(),
   sortBy: z.enum(SORT_FIELD_NAMES).default('fullName'),
   sortDir: z.enum(['asc', 'desc']).default('asc'),
+  /** Former employees are hidden unless asked for. */
+  status: z.enum(['active', 'terminated', 'all']).default('active'),
 });
 
 export type ListQuery = z.infer<typeof listQuerySchema>;
+
+export const terminateSchema = z.object({
+  /** Last day of employment; defaults to today. */
+  terminationDate: isoDate.optional(),
+});
+export type TerminateInput = z.infer<typeof terminateSchema>;
 
 export const idParamSchema = z.coerce.number().int().positive();

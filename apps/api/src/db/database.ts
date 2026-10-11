@@ -69,6 +69,18 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE employees ADD COLUMN terminated_at TEXT;
   CREATE INDEX idx_employees_status ON employees(status);
   `,
+
+  // 3: enforce the audit trail in the database, not just by convention (D5).
+  // Any UPDATE/DELETE of history, or DELETE of an employee (which would cascade
+  // into history), is rejected however the database is reached.
+  `
+  CREATE TRIGGER salary_history_append_only_update BEFORE UPDATE ON salary_history
+  BEGIN SELECT RAISE(ABORT, 'salary_history is append-only'); END;
+  CREATE TRIGGER salary_history_append_only_delete BEFORE DELETE ON salary_history
+  BEGIN SELECT RAISE(ABORT, 'salary_history is append-only'); END;
+  CREATE TRIGGER employees_no_delete BEFORE DELETE ON employees
+  BEGIN SELECT RAISE(ABORT, 'employees are terminated, not deleted'); END;
+  `,
 ];
 
 export function schemaVersion(db: DB): number {
