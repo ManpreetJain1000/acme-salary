@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toQueryString } from './api';
+import { safeNext, toQueryString } from './api';
 import { formatMoney, formatPercent, toMinor } from './format';
 
 describe('formatMoney', () => {
@@ -37,5 +37,17 @@ describe('toQueryString', () => {
   it('drops empty values and encodes the rest', () => {
     expect(toQueryString({ page: 1, search: '', country: undefined, q: 'a b' })).toBe('?page=1&q=a+b');
     expect(toQueryString({})).toBe('');
+  });
+});
+
+describe('safeNext', () => {
+  it('keeps same-site paths', () => {
+    expect(safeNext('/insights?country=IN')).toBe('/insights?country=IN');
+  });
+
+  it('refuses anything that could leave the site', () => {
+    for (const bad of ['https://evil.example', '//evil.example', '/\\evil.example', 'insights', '', null, undefined]) {
+      expect(safeNext(bad)).toBe('/');
+    }
   });
 });

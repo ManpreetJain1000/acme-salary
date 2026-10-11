@@ -39,13 +39,31 @@ export function toQueryString(params: object): string {
   return s ? `?${s}` : '';
 }
 
+/**
+ * Where to go after signing in. Only same-site paths are accepted, so a crafted
+ * link (?next=//evil.example) can't bounce the user to another site.
+ */
+export function safeNext(next: string | null | undefined): string {
+  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/\\')) return '/';
+  return next;
+}
+
+function redirectToLogin() {
+  if (typeof window === 'undefined' || window.location.pathname === '/login') return;
+  const next = window.location.pathname + window.location.search;
+  window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
+    // POSTs must be JSON (the API's CSRF defence), so always say so.
     headers: { 'content-type': 'application/json', ...init?.headers },
   });
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => null);
+  // Session missing or expired: send the user to sign in, then back here.
+  if (res.status === 401 && !path.startsWith('/api/auth/')) redirectToLogin();
   if (!res.ok) {
     const err = body?.error;
     throw new ApiError(res.status, err?.code ?? 'UNKNOWN', err?.message ?? res.statusText, err?.details ?? []);
@@ -54,6 +72,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  login: (email: string, password: string) =>
+    request<{ email: string }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  logout: () => request<void>('/api/auth/logout', { method: 'POST', body: '{}' }),
+  me: () => request<{ email: string }>('/api/auth/me'),
+  /** Demo deployments only; 404 otherwise. */
+  demoCredentials: () => request<{ email: string; password: string }>('/api/auth/demo'),
   meta: () => request<Meta>('/api/meta'),
   listEmployees: (q: EmployeeQuery) => request<Page<Employee>>(`/api/employees${toQueryString(q)}`),
   getEmployee: (id: number) => request<EmployeeDetail>(`/api/employees/${id}`),
@@ -66,7 +90,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(terminationDate ? { terminationDate } : {}),
     }),
-  reinstateEmployee: (id: number) => request<Employee>(`/api/employees/${id}/reinstate`, { method: 'POST' }),
+  reinstateEmployee: (id: number) =>
+    request<Employee>(`/api/employees/${id}/reinstate`, { method: 'POST', body: '{}' }),
   summary: (f: InsightFilter) => request<Summary>(`/api/insights/summary${toQueryString(f)}`),
   payBands: (f: InsightFilter) =>
     request<{ data: PayBand[] }>(`/api/insights/pay-bands${toQueryString(f)}`).then((r) => r.data),
