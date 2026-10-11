@@ -81,6 +81,14 @@ export const MIGRATIONS: readonly string[] = [
   CREATE TRIGGER employees_no_delete BEFORE DELETE ON employees
   BEGIN SELECT RAISE(ABORT, 'employees are terminated, not deleted'); END;
   `,
+
+  // 4: status alone matches ~all rows, so the planner used it and sorted 10k rows in a
+  // temp B-tree (0.2 ms -> 3 ms for the default directory page). (status, full_name)
+  // serves the default filter + sort straight from the index again.
+  `
+  DROP INDEX idx_employees_status;
+  CREATE INDEX idx_employees_status_name ON employees(status, full_name);
+  `,
 ];
 
 export function schemaVersion(db: DB): number {
