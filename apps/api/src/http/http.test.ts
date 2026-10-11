@@ -54,6 +54,19 @@ describe('request ids and logging', () => {
   });
 });
 
+describe('health check', () => {
+  it('reports the database as ok', async () => {
+    const { app } = setupTestApp();
+    expect((await request(app).get('/api/health').expect(200)).body).toEqual({ status: 'ok', database: 'ok' });
+  });
+
+  it('answers 503 when the database is unavailable', async () => {
+    const { app, db } = setupTestApp();
+    db.close();
+    expect((await request(app).get('/api/health').expect(503)).body).toEqual({ status: 'unavailable', database: 'down' });
+  });
+});
+
 describe('rate limiting', () => {
   it('answers 429 in the standard error shape once the limit is reached', async () => {
     const { app } = setupTestApp({ rateLimitPerMinute: 2 });

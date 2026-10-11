@@ -43,8 +43,13 @@ export function createApp({ db, corsOrigin, now, logger, auth, rateLimitPerMinut
   app.use(cors({ origin: corsOrigin ?? false }));
   app.use(express.json({ limit: '50kb' }));
 
+  const employees = new EmployeeRepository(db);
+
+  // Liveness and readiness in one: 503 when the database can't answer, so the
+  // platform's health check restarts or stops routing to a broken instance.
   app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok' });
+    const database = employees.ping();
+    res.status(database ? 200 : 503).json({ status: database ? 'ok' : 'unavailable', database: database ? 'ok' : 'down' });
   });
 
   // In-memory store: correct for one instance. Several instances would share a
@@ -86,7 +91,6 @@ export function createApp({ db, corsOrigin, now, logger, auth, rateLimitPerMinut
     });
   });
 
-  const employees = new EmployeeRepository(db);
   app.use('/api/employees', employeeRoutes(new EmployeeService(employees, now)));
   app.use('/api/insights', insightRoutes(new InsightService(employees)));
 

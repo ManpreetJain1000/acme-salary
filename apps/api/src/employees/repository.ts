@@ -121,6 +121,15 @@ export function formatEmployeeCode(n: number): string {
 export class EmployeeRepository {
   constructor(private readonly db: DB) {}
 
+  /** True if the database answers a trivial query (health check). */
+  ping(): boolean {
+    try {
+      return (this.db.prepare('SELECT 1 AS ok').get() as { ok: number }).ok === 1;
+    } catch {
+      return false;
+    }
+  }
+
   /** Changes whenever any employee row is written, by any connection (migration 5). */
   dataVersion(): number {
     return (
