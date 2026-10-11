@@ -66,6 +66,30 @@ describe('InsightService', () => {
   });
 });
 
+describe('InsightService money rounding', () => {
+  // Tiny amounts make rounding visible: 50 paise = $0.00565 -> 0.565 cents.
+  it('sums exact USD values and rounds the total once, not per employee', () => {
+    const { db } = setupTestApp();
+    const employees = new EmployeeService(new EmployeeRepository(db));
+    for (let i = 0; i < 3; i++) {
+      employees.create(employeeInput({ country: 'IN', currency: 'INR', salaryMinor: 50 }));
+    }
+    // Exact: 3 x 0.565 = 1.695 -> 2 cents. Rounding each row first would give 3.
+    expect(new InsightService(new EmployeeRepository(db)).summary({}).totalPayrollUsdMinor).toBe(2);
+  });
+
+  it('converts the exact local median to USD instead of rounding twice', () => {
+    const { db } = setupTestApp();
+    const employees = new EmployeeService(new EmployeeRepository(db));
+    for (const salaryMinor of [1, 2]) {
+      employees.create(employeeInput({ country: 'GB', currency: 'GBP', salaryMinor }));
+    }
+    // Exact median 1.5p x 1.33 = 1.995 -> 2 cents. Rounding the median to 2p first gives 2.66 -> 3.
+    const [band] = new InsightService(new EmployeeRepository(db)).payBands({});
+    expect(band!.medianUsdMinor).toBe(2);
+  });
+});
+
 describe('Insights API', () => {
   it('validates query parameters', async () => {
     const { app } = setupTestApp();

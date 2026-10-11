@@ -1,6 +1,6 @@
-import { toUsdMinor } from '../domain/money.js';
+import { toUsdExact } from '../domain/money.js';
 import { countryByCode } from '../domain/reference.js';
-import { describe, relativeDeviation, type Distribution } from '../domain/stats.js';
+import { describe, medianExact, relativeDeviation, type Distribution } from '../domain/stats.js';
 import type { EmployeeRepository, SalaryRow } from '../employees/repository.js';
 import type { InsightFilter, OutlierQuery } from './schemas.js';
 
@@ -44,6 +44,8 @@ export interface Outlier {
   deviation: number;
 }
 
+const sum = (values: readonly number[]) => values.reduce((a, b) => a + b, 0);
+
 function groupBy<T>(items: readonly T[], keyOf: (item: T) => string): Map<string, T[]> {
   const groups = new Map<string, T[]>();
   for (const item of items) {
@@ -68,8 +70,10 @@ export class InsightService {
 
   summary(filter: InsightFilter): Summary {
     const rows = this.rows(filter);
-    const usd = rows.map((r) => toUsdMinor(r.salary_minor, r.currency));
+    // Exact USD per row; every aggregate is rounded once, at the end.
+    const usd = rows.map((r) => toUsdExact(r.salary_minor, r.currency));
     const withUsd = rows.map((r, i) => ({ row: r, usd: usd[i]! }));
+    const roundedMedian = (values: number[]) => Math.round(medianExact(values)!);
 
     const breakdown = (keyOf: (r: SalaryRow) => string, labelOf: (k: string) => string) =>
       [...groupBy(withUsd, (x) => keyOf(x.row))]
@@ -79,16 +83,16 @@ export class InsightService {
             key,
             label: labelOf(key),
             headcount: items.length,
-            totalUsdMinor: values.reduce((a, b) => a + b, 0),
-            medianUsdMinor: describe(values)!.median,
+            totalUsdMinor: Math.round(sum(values)),
+            medianUsdMinor: roundedMedian(values),
           };
         })
         .sort((a, b) => b.totalUsdMinor - a.totalUsdMinor);
 
     return {
       headcount: rows.length,
-      totalPayrollUsdMinor: usd.reduce((a, b) => a + b, 0),
-      medianUsdMinor: describe(usd)?.median ?? null,
+      totalPayrollUsdMinor: Math.round(sum(usd)),
+      medianUsdMinor: usd.length ? roundedMedian(usd) : null,
       byCountry: breakdown(
         (r) => r.country,
         (k) => countryByCode(k)?.name ?? k,
@@ -105,7 +109,8 @@ export class InsightService {
     const bands: PayBand[] = [];
     for (const items of groups.values()) {
       const first = items[0]!;
-      const dist = describe(items.map((r) => r.salary_minor))!;
+      const local = items.map((r) => r.salary_minor);
+      const dist = describe(local)!;
       bands.push({
         country: first.country,
         countryName: countryByCode(first.country)?.name ?? first.country,
@@ -113,7 +118,8 @@ export class InsightService {
         department: first.department,
         currency: first.currency,
         ...dist,
-        medianUsdMinor: toUsdMinor(dist.median, first.currency),
+        // Convert the exact local median, not the rounded one: round once.
+        medianUsdMinor: Math.round(toUsdExact(medianExact(local)!, first.currency)),
       });
     }
     return bands.sort(
@@ -127,7 +133,7 @@ export class InsightService {
     for (const items of groups.values()) {
       // Tiny groups have no meaningful "normal"; skip them rather than flag noise.
       if (items.length < query.minGroupSize) continue;
-      const median = describe(items.map((r) => r.salary_minor))!.median;
+      const median = medianExact(items.map((r) => r.salary_minor))!;
       for (const r of items) {
         const deviation = relativeDeviation(r.salary_minor, median);
         if (Math.abs(deviation) >= query.threshold) {
@@ -140,7 +146,7 @@ export class InsightService {
             country: r.country,
             currency: r.currency,
             salaryMinor: r.salary_minor,
-            groupMedianMinor: median,
+            groupMedianMinor: Math.round(median),
             groupSize: items.length,
             deviation: Math.round(deviation * 1000) / 1000,
           });

@@ -14,11 +14,10 @@ export interface Distribution {
 }
 
 /**
- * Percentile of an ascending-sorted array using linear interpolation between
+ * Exact percentile of an ascending-sorted array, using linear interpolation between
  * closest ranks (the same method as Excel's PERCENTILE.INC, which HR already knows).
- * Result is rounded to an integer because inputs are integer minor units.
  */
-export function percentileSorted(sorted: readonly number[], p: number): number {
+export function percentileExact(sorted: readonly number[], p: number): number {
   if (sorted.length === 0) throw new Error('percentile of empty set');
   if (p < 0 || p > 1) throw new Error('p must be within [0, 1]');
   const rank = p * (sorted.length - 1);
@@ -26,7 +25,18 @@ export function percentileSorted(sorted: readonly number[], p: number): number {
   const hi = Math.ceil(rank);
   const loVal = sorted[lo]!;
   const hiVal = sorted[hi]!;
-  return Math.round(loVal + (hiVal - loVal) * (rank - lo));
+  return loVal + (hiVal - loVal) * (rank - lo);
+}
+
+/** Percentile rounded once to an integer (minor units). */
+export function percentileSorted(sorted: readonly number[], p: number): number {
+  return Math.round(percentileExact(sorted, p));
+}
+
+/** Exact median of unsorted values, or null for none. */
+export function medianExact(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  return percentileExact([...values].sort((a, b) => a - b), 0.5);
 }
 
 /** Summary distribution, or null for an empty input (no fake zeros). */

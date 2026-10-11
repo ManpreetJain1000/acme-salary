@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromUsdMinor, toUsdMinor } from './money.js';
+import { fromUsdMinor, toUsdExact, toUsdMinor } from './money.js';
 
 describe('toUsdMinor', () => {
   it('is the identity for USD', () => {
@@ -15,6 +15,12 @@ describe('toUsdMinor', () => {
 
   it('throws on an unsupported currency rather than guessing', () => {
     expect(() => toUsdMinor(100, 'XYZ')).toThrow(/Unsupported currency/);
+  });
+});
+
+describe('toUsdExact', () => {
+  it('does not round, so sums can be rounded once', () => {
+    expect(toUsdExact(50, 'INR')).toBeCloseTo(0.565, 10);
   });
 });
 

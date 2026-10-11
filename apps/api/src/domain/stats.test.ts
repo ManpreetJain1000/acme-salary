@@ -1,5 +1,5 @@
 import { describe as suite, expect, it } from 'vitest';
-import { describe, percentileSorted, relativeDeviation } from './stats.js';
+import { describe, medianExact, percentileExact, percentileSorted, relativeDeviation } from './stats.js';
 
 suite('percentileSorted', () => {
   it('returns the only value for a single-element set', () => {
@@ -52,5 +52,13 @@ suite('relativeDeviation', () => {
 
   it('rejects a zero reference', () => {
     expect(() => relativeDeviation(1, 0)).toThrow();
+  });
+});
+
+suite('exact helpers', () => {
+  it('keeps fractions until the caller rounds', () => {
+    expect(percentileExact([10, 20, 30, 40], 0.25)).toBe(17.5);
+    expect(medianExact([3, 1, 2, 4])).toBe(2.5);
+    expect(medianExact([])).toBeNull();
   });
 });

@@ -3,14 +3,20 @@ import { CURRENCIES, type CurrencyCode } from './reference.js';
 const RATES = new Map(CURRENCIES.map((c) => [c.code, c.usdRate]));
 
 /**
- * Convert an amount in minor units of `currency` to USD minor units (cents).
- * Rounds half away from zero only at the end, so we never accumulate float error
- * across operations. Throws on unknown currency: silent fallbacks hide data bugs.
+ * Exact USD value, in minor units (cents), of an amount in minor units of `currency`.
+ * Unrounded on purpose: aggregates (totals, medians) are computed from exact values
+ * and rounded once at the end, so rounding error never accumulates across rows.
+ * Throws on unknown currency: silent fallbacks hide data bugs.
  */
-export function toUsdMinor(amountMinor: number, currency: CurrencyCode | string): number {
+export function toUsdExact(amountMinor: number, currency: CurrencyCode | string): number {
   const rate = RATES.get(currency as CurrencyCode);
   if (rate === undefined) throw new Error(`Unsupported currency: ${currency}`);
-  return Math.round(amountMinor * rate);
+  return amountMinor * rate;
+}
+
+/** A single amount in USD cents, rounded once. Use toUsdExact for anything aggregated. */
+export function toUsdMinor(amountMinor: number, currency: CurrencyCode | string): number {
+  return Math.round(toUsdExact(amountMinor, currency));
 }
 
 /** Inverse of toUsdMinor; used by the seed to express USD bands in local currency. */
